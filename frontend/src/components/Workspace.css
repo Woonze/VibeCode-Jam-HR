@@ -559,6 +559,53 @@
   color: #9ca3af;
 }
 
+.ws-tests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 15px;
+}
+
+.ws-test-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.ws-test-status.ok {
+  color: #4caf50;
+  font-weight: 700;
+}
+
+.ws-test-status.fail {
+  color: #f44336;
+  font-weight: 700;
+}
+
+.ws-hidden-tests-summary {
+  margin-top: 10px;
+  padding-top: 6px;
+  font-size: 13px;
+  opacity: 0.7;
+  border-top: 1px solid #333;
+}
+
+.ws-llm-feedback {
+  margin-top: 15px;
+  font-size: 14px;
+}
+
+.ws-feedback-score span {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.ws-feedback-comment {
+  margin-top: 10px;
+}
+
+
 /* ====== RESPONSIVE (чуть-чуть) ====== */
 
 @media (max-width: 1150px) {

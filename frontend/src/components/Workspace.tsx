@@ -20,6 +20,13 @@ type Task = {
   template: string;
 };
 
+type TestResults = {
+  name: string;
+  passed: boolean;
+  visible: boolean;
+};
+
+
 export default function Workspace() {
   const editorRef = useRef<any>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
@@ -681,34 +688,36 @@ export default function Workspace() {
                   </div>
 
                   <div className="ws-panel ws-feedback-panel">
-                    <div className="ws-panel-header">Фидбек</div>
+                    <div className="ws-panel-header">Результаты тестов</div>
                     <div className="ws-panel-body">
-                      {feedback ? (
-                        <div className="ws-feedback-content">
-                          {feedback.score !== undefined && (
-                            <div className="ws-feedback-score">
-                              Оценка: <span>{feedback.score}/100</span>
-                            </div>
-                          )}
-
-                          {feedback.comment && (
-                            <div className="ws-feedback-comment">
-                              <div className="ws-feedback-label">Комментарий ИИ:</div>
-                                <p>{feedback.comment}</p>
+                      {feedback && feedback.tests ? (
+                        <div className="ws-tests-list">
+                          {/* === ВИДИМЫЕ ТЕСТЫ === */}
+                          {feedback.tests
+                            .filter((t:TestResults) => t.visible)
+                            .map((t:TestResults, i: number) => (
+                              <div key={i} className="ws-test-item">
+                                <span className={`ws-test-status ${t.passed ? "ok" : "fail"}`}>
+                                  {t.passed ? "✔" : "✘"}
+                                </span>
+                                <span className="ws-test-name">{t.name}</span>
                               </div>
-                          )}
-
-                          {feedback.report && (
-                            <div className="ws-feedback-report">
-                              <a href={feedback.report} target="_blank">Открыть PDF отчёт</a>
-                            </div>
-                          )}
+                          ))}
+                          {/* === СКРЫТЫЕ ТЕСТЫ (только итог статус) === */}
+                          <div className="ws-hidden-tests-summary">
+                            Скрытые тесты:{" "}
+                            <b>
+                              {feedback.tests.filter((t:TestResults) => !t.visible && t.passed).length}/
+                              {feedback.tests.filter((t:TestResults) => !t.visible).length}
+                            </b>
+                          </div>
                         </div>
                       ) : (
-                        "Фидбек появится после отправки решения."
+                        <div>Тесты появятся после отправки решения.</div>
                       )}
                     </div>
                   </div>
+
                 </div>
               </>
             )}
