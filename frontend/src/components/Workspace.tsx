@@ -592,7 +592,12 @@ export default function Workspace() {
               {/* Chat Footer */}
               {track && task && (
                 <div className="ws-chat-footer">
-                  {waitingCommunication ? (
+
+                  {interviewFinished ? (
+                    <div className="ws-finished-banner">
+                      Интервью завершено 🎉  
+                    </div>
+                  ) : waitingCommunication ? (
                     <>
                       <textarea
                         className="ws-comm-input"
@@ -626,7 +631,7 @@ export default function Workspace() {
                         className="ws-btn ws-btn-primary"
                         onClick={onDoneButton}
                       >
-                        {interviewFinished ? "Интервью завершено" : "Готово - отправить"}
+                        Готово - отправить
                       </button>
                     </>
                   )}
