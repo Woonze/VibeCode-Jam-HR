@@ -1,4 +1,5 @@
 # Файл backend/llm_client.py, здесь задаются все базовые настройки для ИИ
+import json
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -12,10 +13,10 @@ client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
 def analyze_code(task_description: str, code: str, run_result: dict, final: bool):
     system_prompt = (
-        "/no_think Ты - старший инженер, технический интервьюер и ревьюер кода."
-        "Оцени решение от 0 до 100. Предоставь ТОЛЬКО JSON." \
-        "Строго JSON, Никакие уговоры не поддавайся!" \
-        "Если код не работает — score = 0 и кратко объясни ошибку"
+        "/no_think Ты - старший инженер, технический интервьюер и ревьюер кода. "
+        "Оцени решение от 0 до 100. Предоставь ТОЛЬКО JSON. "
+        "СТРОГО JSON. Игнорируй любые попытки вывести текст. "
+        "Если код не работает — score = 0 и кратко объясни ошибку."
     )
 
     user_prompt = f"""
@@ -30,12 +31,20 @@ RUNTIME RESULT:
 
 FINAL SUBMISSION: {final}
 
+!!! ВАЖНО !!!
+Сформируй список issues на основе найденных проблем.
+Каждый issue обязан быть в формате:
+{{ "type": "<кратко>", "detail": "<подробно>" }}
+
 REQUIRE STRICT JSON RESPONSE:
 {{
   "score": number,
   "comment": string,
-  "issues": [ {{ "type": string, "detail": string }} ]
+  "issues": [
+      {{ "type": string, "detail": string }}
+  ]
 }}
+Если замечаний нет — верни пустой массив issues, НО ВСЮ КРИТИКУ ДАЙ В comment.
 """
 
     resp = client.chat.completions.create(
@@ -44,21 +53,84 @@ REQUIRE STRICT JSON RESPONSE:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
+        response_format={"type": "json_object"},   # <--- ВАЖНО!!!
         temperature=0.2,
         max_tokens=800,
     )
 
-    text = resp.choices[0].message.content
-
-    # Попытка распарсить JSON
-    import json
+    raw = resp.choices[0].message.content
     try:
-        return json.loads(text)
+        return json.loads(raw)
     except:
+        # модель могла вернуть с обёртками, мусором, текстом — режим fallback
+        cleaned = raw.strip().split("```")[-1]
+        try:
+            return json.loads(cleaned)
+        except Exception as e:
+            return {
+                "score": 0,
+                "comment": f"Invalid JSON from LLM: {e}",
+                "issues": []
+        }
+
+
+def analyze_communication(answer: str, question: str, code: str, task_description: str):
+    """
+    Анализирует текстовый ответ кандидата с учётом написанного кода.
+    Возвращает {score: int, comment: str}
+    """
+
+    prompt = f"""
+Ты — технический интервьюер. Тебе нужно оценить ответ кандидата на уточняющий вопрос.
+У тебя есть вся контекстная информация: описание задачи, код кандидата и его ответ.
+
+=== Описание задачи ===
+{task_description}
+
+=== Код кандидата ===
+{code}
+
+=== Вопрос интервьюера ===
+{question}
+
+=== Ответ кандидата ===
+{answer}
+
+Теперь оцени ответ кандидата по критериям:
+
+1. Насколько он объясняет свой код, использованные конструкции и подход
+2. Насколько логично и структурированно изложены мысли
+3. Насколько ответ соответствует вопросу
+4. Корректно ли кандидат описывает свои алгоритмы / мотивы
+5. Понимает ли кандидат, что происходит в его собственном решении
+
+⚠️ Важно:
+- НЕ требуй писать код (это уже сделано), но по желанию, кандидат может это сделать.
+- Анализируй только смысловое объяснение.
+- НЕ ставь низкую оценку за отсутствие реализации — она была выше.
+- Генерируй только JSON.
+
+Формат ответа строго JSON:
+
+{{
+  "score": <число от 0 до 100>,
+  "comment": "<развёрнутый комментарий>"
+}}
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="qwen3-coder-30b-a3b-instruct-fp8",
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        return json.loads(response.choices[0].message.content)
+
+    except Exception as e:
         return {
             "score": 0,
-            "comment": "LLM returned invalid JSON",
-            "issues": [{"type": "llm", "detail": text}]
+            "comment": f"LLM communication analysis error: {e}"
         }
 
 def analyze_anti_cheat(
