@@ -1,4 +1,5 @@
 # Файл backend/llm_client.py, здесь задаются все базовые настройки для ИИ
+import json
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -59,6 +60,65 @@ REQUIRE STRICT JSON RESPONSE:
             "score": 0,
             "comment": "LLM returned invalid JSON",
             "issues": [{"type": "llm", "detail": text}]
+        }
+
+def analyze_communication(answer: str, question: str, code: str, task_description: str):
+    """
+    Анализирует текстовый ответ кандидата с учётом написанного кода.
+    Возвращает {score: int, comment: str}
+    """
+
+    prompt = f"""
+Ты — технический интервьюер. Тебе нужно оценить ответ кандидата на уточняющий вопрос.
+У тебя есть вся контекстная информация: описание задачи, код кандидата и его ответ.
+
+=== Описание задачи ===
+{task_description}
+
+=== Код кандидата ===
+{code}
+
+=== Вопрос интервьюера ===
+{question}
+
+=== Ответ кандидата ===
+{answer}
+
+Теперь оцени ответ кандидата по критериям:
+
+1. Насколько он объясняет свой код, использованные конструкции и подход
+2. Насколько логично и структурированно изложены мысли
+3. Насколько ответ соответствует вопросу
+4. Корректно ли кандидат описывает свои алгоритмы / мотивы
+5. Понимает ли кандидат, что происходит в его собственном решении
+
+⚠️ Важно:
+- НЕ требуй писать код (это уже сделано), но по желанию, кандидат может это сделать.
+- Анализируй только смысловое объяснение.
+- НЕ ставь низкую оценку за отсутствие реализации — она была выше.
+- Генерируй только JSON.
+
+Формат ответа строго JSON:
+
+{{
+  "score": <число от 0 до 100>,
+  "comment": "<развёрнутый комментарий>"
+}}
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="qwen3-coder-30b-a3b-instruct-fp8",
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        return json.loads(response.choices[0].message.content)
+
+    except Exception as e:
+        return {
+            "score": 0,
+            "comment": f"LLM communication analysis error: {e}"
         }
 
 def analyze_anti_cheat(

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from models import CompileRequest, AssessRequest, AntiCheatEvent, AntiCheatAnalyze  # CompileResponse/AssessResponse можно не использовать жёстко
 from sandbox import run_js, run_py
-from llm_client import analyze_code, analyze_anti_cheat
+from llm_client import analyze_code, analyze_communication, analyze_anti_cheat
 from report import generate_report
 
 app = FastAPI()
@@ -760,11 +760,11 @@ async def submit(req: AssessRequest):
 
     # задаём вопрос по коммуникации
     comm_question = random.choice([
-        "Поясни, почему ты выбрал именно такой подход?",
-        "Можешь кратко описать логику своего решения?",
+        "Поясните, почему вы выбрали именно такой подход?",
+        "Можете кратко описать логику вашего решения?",
         "Какие альтернативные способы решения возможны?",
-        "Как бы ты улучшил алгоритм?",
-        "Что является слабым местом твоего решения?"
+        "Как бы вы улучшили алгоритм?",
+        "Что является слабым местом вашего решения?"
     ])
 
     session["waitingCommunication"] = True
@@ -836,12 +836,13 @@ async def communication_answer(data: dict):
 
 
     # LLM анализирует ответ
-    llm_comm = analyze_code(
-        task_description="Оцени ответ кандидата на уточняющий вопрос.",
-        code=answer,
-        run_result=None,
-        final=True
-    )
+    llm_comm = analyze_communication(
+    answer=answer,
+    question=session.get("lastCommunicationQuestion", ""),
+    code=session["pendingResult"]["code"],
+    task_description=session["pendingResult"]["description"],
+)
+
 
     comm_score = llm_comm.get("score", 0)
     comm_comment = llm_comm.get("comment", "")
