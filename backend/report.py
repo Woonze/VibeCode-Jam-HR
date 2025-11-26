@@ -78,18 +78,48 @@ def draw_code_block(c, text, y):
     if not text:
         return y - 10
 
-    # фон
+    # cначала вычисляем все строки с учетом переноса
+    all_lines = []
+    for line in text.split("\n"):
+        # переносим длинные строки
+        wrapped = textwrap.wrap(line, 95)
+        if wrapped:
+            all_lines.extend(wrapped)
+        else:
+            all_lines.append("")  # пустая строка
+    
+    # вычисляем высоту блока
+    block_height = len(all_lines) * 12 + 8
+    
+    # проверяем, помещается ли блок на текущей странице
+    if y - block_height < 60:
+        c.showPage()
+        y = 760
+    
+    # Рисуем фон
     c.setFillColor(CODE_BG)
-    c.rect(30, y - 4, 550, -(len(text.split("\n")) * 14 + 8), fill=1, stroke=0)
+    c.rect(30, y - 4, 550, -block_height, fill=1, stroke=0)
 
-    # текст
+    # Текст
     c.setFont("Roboto", 9)
     c.setFillColor(colors.black)
-
-    for line in text.split("\n"):
-        for subline in textwrap.wrap(line, 95):
-            c.drawString(40, y, subline)
-            y -= 12
+    
+    start_y = y
+    for idx, subline in enumerate(all_lines):
+        # Проверяем, нужна ли новая страница
+        if y < 60:
+            c.showPage()
+            y = 760
+            # Перерисовываем фон на новой странице
+            remaining_lines = all_lines[idx:]
+            remaining_height = len(remaining_lines) * 12 + 8
+            c.setFillColor(CODE_BG)
+            c.rect(30, y - 4, 550, -remaining_height, fill=1, stroke=0)
+            c.setFillColor(colors.black)
+            c.setFont("Roboto", 9)
+        
+        c.drawString(40, y, subline)
+        y -= 12
 
     return y - 16
 
@@ -190,13 +220,16 @@ def generate_report(
 
         issues = analysis.get("issues", [])
         if issues:
-            y = draw_paragraph(c, "Замечания:", y)
+            y = draw_paragraph(c, "Выявленные проблемы:", y)
             for issue in issues:
+                issue_type = issue.get('type', 'unknown')
+                issue_detail = issue.get('detail', '')
                 y = draw_paragraph(
-                    c, f"• {issue['type']}: {issue['detail']}", y, indent=20
+                    c, f"• [{issue_type}]: {issue_detail}", y, indent=20
                 )
-        else:
-            y = draw_paragraph(c, "Проблемы не обнаружены.", y)
+        # Если issues пустой, но оценка низкая или есть критика в комментарии - не пишем "проблем не обнаружено"
+        elif analysis.get("score", 100) < 70 or ("проблем" in analysis.get("comment", "").lower() or "ошибк" in analysis.get("comment", "").lower()):
+            y = draw_paragraph(c, "Детали анализа см. в комментарии выше.", y)
 
         y -= 8
         y = new_page_if_needed(c, y)
