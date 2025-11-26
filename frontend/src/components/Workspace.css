@@ -343,6 +343,18 @@
   gap: 8px;
 }
 
+.ws-finished-banner {
+  width: 100%;
+  padding: 14px;
+  background: #e3ffe8;
+  border: 1px solid #7ddf8f;
+  color: #226d3b;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+}
+
 /* buttons */
 
 .ws-btn {
