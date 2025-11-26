@@ -377,6 +377,10 @@ interviews: Dict[str, Dict[str, Any]] = {
         "history": [],   # все попытки (компиляции) по ходу интервью
         "results": [],   # результаты по задачам после анализа LLM
         "currentTask": None,
+        "waitingCommunication": False,
+        "lastCommunicationQuestion": None,
+        "pendingResult": None,
+        "communications": []
     }
 }
 
@@ -469,32 +473,29 @@ async def start_interview():
 async def compile_code(req: CompileRequest):
     session = interviews["default"]
 
-    lang = req.language
+    lang = (req.language or "").lower()
 
-    if lang == "javascript":
-        return run_js(req.code)
-
-    elif lang == "python":
-        return run_py(req.code)
-
+    # определяем раннер
+    if lang in ("javascript", "js"):
+        sandbox_runner = run_js
+    elif lang in ("python", "py"):
+        sandbox_runner = run_py
     else:
         return {"error": "Unsupported language"}
 
-    # запускаем код в песочнице
-    run = run_js if session["track"] == "js" else run_py
-    result = run(req.code)
+    # запускаем код
+    result = sandbox_runner(req.code)
 
-    # аккуратно чиним кодировку stdout/stderr
+    # чиним кривые кодировки
     raw_stdout = result.get("stdout")
     raw_stderr = result.get("stderr")
     stdout = fix_encoding(raw_stdout)
     stderr = fix_encoding(raw_stderr)
 
-    # обновляем результат, чтобы фронт сразу получил нормальный русский
     result["stdout"] = stdout
     result["stderr"] = stderr
 
-    # сохраняем попытку
+    # сохраняем историю попыток
     session["history"].append({
         "taskId": req.taskId,
         "attempt": len(session["history"]) + 1,
@@ -517,18 +518,16 @@ async def submit(req: AssessRequest):
     bank = TASK_BANK_JS if track == "js" else TASK_BANK_PY
 
     task = session.get("currentTask")
-
     if not task:
-        # на всякий случай, если фронт дернул submit без start_interview
         return {
             "messages": [{
                 "role": "assistant",
-                "content": "Сессия не инициализирована. Обновите страницу для начала интервью.",
+                "content": "Сессия не инициализирована. Обновите страницу."
             }],
-            "finished": True,
+            "finished": True
         }
 
-    # анализируем решение текущей задачи
+    # анализ кода LLM
     llm_result = analyze_code(
         task_description=task["description"],
         code=req.code,
@@ -536,84 +535,213 @@ async def submit(req: AssessRequest):
         final=True,
     )
 
-    score = llm_result.get("score", 0)
-    comment = llm_result.get("comment", "")
+    # гарантируем наличие ключей
+    score_code = llm_result.get("score") or llm_result.get("final_score") or 0
+    comment_code = llm_result.get("comment") or "Комментарий отсутствует."
 
-    # сохраняем результат по задаче
-    session["results"].append({
+    # сохраняем pendingResult
+    session["pendingResult"] = {
         "taskId": task["id"],
         "title": task["title"],
         "description": task["description"],
         "code": req.code,
-        "analysis": llm_result,
-    })
+        "analysis_code": {
+            "score": score_code,
+            "comment": comment_code
+        }
+    }
 
-    # короткий разбор в чат
+    # сообщение в чат
     session["messages"].append({
         "role": "assistant",
         "content": (
             f"Разбор решения по задаче {task['id']} ({task['title']}):\n"
-            f"Оценка: {score}/100\n"
-            f"{comment}"
-        ),
+            f"Оценка за код: {score_code}/100\n"
+            f"{comment_code}"
+        )
     })
 
-    # ----------------------------------------
-    # Если ещё не 3-я задача — выдаём следующую
-    # ----------------------------------------
+    # задаём вопрос по коммуникации
+    comm_question = random.choice([
+        "Поясни, почему ты выбрал именно такой подход?",
+        "Можешь кратко описать логику своего решения?",
+        "Какие альтернативные способы решения возможны?",
+        "Как бы ты улучшил алгоритм?",
+        "Что является слабым местом твоего решения?"
+    ])
+
+    session["waitingCommunication"] = True
+    session["lastCommunicationQuestion"] = comm_question
+
+    session["communications"].append({
+        "taskId": task["id"],
+        "question": comm_question,
+        "answer": None,
+        "score_comm": None,
+        "comment_comm": None
+})
+
+
+    session["messages"].append({
+        "role": "assistant",
+        "content": (
+            "Теперь небольшой вопрос по вашему решению:\n"
+            f"{comm_question}"
+        )
+    })
+
+    return {
+        "messages": session["messages"],
+        "ask_communication": True,
+        "communication_question": comm_question,
+        "finished": False,
+        "score_code": score_code,
+        "comment_code": comment_code,
+    }
+
+
+
+# -------------------------------------------------
+# /api/communication_answer - оценка ответа на вопрос
+# -------------------------------------------------
+@app.post("/api/communication_answer")
+async def communication_answer(data: dict):
+    session = interviews["default"]
+
+    if not session.get("waitingCommunication"):
+        return {
+            "messages": [{
+                "role": "assistant",
+                "content": "Не жду ответа. Возможно, уже перешли к следующему этапу."
+            }],
+            "finished": False
+        }
+
+    answer = data.get("answer", "").strip()
+    # ищем последнюю запись без ответа
+    comm_entry = next(
+        (c for c in session["communications"] if c["answer"] is None),
+        None
+    )
+
+    if not comm_entry:
+        return {
+            "messages": session["messages"],
+            "finished": False,
+            "error": "Нет активного вопроса для ответа."
+        }
+
+    comm_entry["answer"] = answer
+
+
+    # выключаем режим ожидания ответа
+    session["waitingCommunication"] = False
+
+
+    # LLM анализирует ответ
+    llm_comm = analyze_code(
+        task_description="Оцени ответ кандидата на уточняющий вопрос.",
+        code=answer,
+        run_result=None,
+        final=True
+    )
+
+    comm_score = llm_comm.get("score", 0)
+    comm_comment = llm_comm.get("comment", "")
+
+    comm_entry["score_comm"] = comm_score
+    comm_entry["comment_comm"] = comm_comment
+
+
+    # показываем ответ в чате
+    session["messages"].append({
+        "role": "assistant",
+        "content": (
+            f"Разбор ответа:\n"
+            f"Оценка коммуникации: {comm_score}/100\n"
+            f"{comm_comment}"
+        )
+    })
+
+    # Достаём результаты предыдущего анализа кода
+    pending = session["pendingResult"]
+    score_code = pending["analysis_code"]["score"]
+    comment_code = pending["analysis_code"]["comment"]
+
+    # считаем итоговую оценку задачи
+    final_score = round(score_code * 0.7 + comm_score * 0.3, 2)
+
+    final_comment = (
+        f"Итоговая оценка за задачу: {final_score}/100\n\n"
+        f"Оценка кода: {score_code}/100\n{comment_code}\n\n"
+        f"Оценка коммуникации: {comm_score}/100\n{comm_comment}"
+    )
+
+    # записываем результат
+    session["results"].append({
+        "taskId": pending["taskId"],
+        "title": pending["title"],
+        "description": pending["description"],
+        "code": pending["code"],
+        "analysis": {
+            "score": final_score,
+            "comment": final_comment,
+            "issues": []
+        }
+    })
+
+
+    session["pendingResult"] = None
+
+    # переход к следующей задаче
+    track = session["track"]
+    bank = TASK_BANK_JS if track == "js" else TASK_BANK_PY
+
+    # ещё не конец
     if session["taskNumber"] < 3:
         session["taskNumber"] += 1
 
-        if session["taskNumber"] == 2:
-            next_task = random.choice(bank["medium"])
-        else:
-            next_task = random.choice(bank["hard"])
-        
-        next_task["language"] = session["track"]
-
+        next_level = "medium" if session["taskNumber"] == 2 else "hard"
+        next_task = random.choice(bank[next_level])
+        next_task["language"] = track
         session["currentTask"] = next_task
 
         session["messages"].append({
             "role": "assistant",
             "content": (
-                f"Теперь задание №{session['taskNumber']}:\n"
+                final_comment +
+                f"\n\nТеперь задание №{session['taskNumber']}:\n"
                 f"{next_task['description']}"
-            ),
+            )
         })
 
         return {
             "messages": session["messages"],
             "task": next_task,
-            "finished": False,
-            "score": score,
-            "comment": comment,
+            "finished": False
         }
 
-    # ----------------------------------------
-    # Это была 3-я задача → финальное резюме
-    # ----------------------------------------
+    # конец интервью
     final_summary = build_final_summary(session["results"])
 
     session["messages"].append({
         "role": "assistant",
-        "content": f"Итог технического интервью:\n{final_summary}",
+        "content": final_comment + "\n\n" + "Итог интервью:\n" + final_summary
     })
 
-    # генерируем красивый PDF
     pdf_path = generate_report(
         candidate_name="Candidate_1",
         results=session["results"],
         history=session["history"],
         final_summary=final_summary,
-        track=session["track"]
+        track=session["track"],
+        communications=session["communications"]
     )
 
     return {
         "messages": session["messages"],
         "report": pdf_path,
-        "finished": True,
-        "score": score,
-        "comment": comment,
+        "finished": True
     }
 
 

@@ -16,14 +16,12 @@ pdfmetrics.registerFont(TTFont("Roboto-Bold", "fonts/Roboto-Bold.ttf"))
 
 
 def wrap_text(text: str, width: int = 90) -> list[str]:
-    """Перенос строк для длинных текстов."""
     if text is None:
         return []
     return textwrap.wrap(text, width)
 
 
 def draw_title(c: canvas.Canvas, text: str, y: float) -> float:
-    """Большой заголовок страницы."""
     c.setFont("Roboto-Bold", 18)
     c.setFillColor(colors.HexColor("#222222"))
     c.drawString(40, y, text)
@@ -31,7 +29,6 @@ def draw_title(c: canvas.Canvas, text: str, y: float) -> float:
 
 
 def draw_subtitle(c: canvas.Canvas, text: str, y: float) -> float:
-    """Подзаголовок раздела."""
     c.setFont("Roboto-Bold", 13)
     c.setFillColor(colors.HexColor("#333333"))
     c.drawString(40, y, text)
@@ -39,7 +36,6 @@ def draw_subtitle(c: canvas.Canvas, text: str, y: float) -> float:
 
 
 def draw_paragraph(c: canvas.Canvas, text: str, y: float) -> float:
-    """Базовый абзац с переносом строк."""
     if not text:
         return y - 10
 
@@ -59,7 +55,6 @@ def draw_paragraph(c: canvas.Canvas, text: str, y: float) -> float:
 
 
 def draw_code_block(c: canvas.Canvas, text: str, y: float) -> float:
-    """Code block для кода кандидата."""
     if not text:
         return y - 10
 
@@ -86,31 +81,13 @@ def generate_report(
     history: List[Dict[str, Any]],
     final_summary: str,
     track: str,
+    communications: List[Dict[str, Any]],   # <-- ДОБАВЛЕНО!!!
 ) -> str:
-    """
-    Создание красивого PDF-отчёта по интервью.
-
-    results: список задач:
-      {
-        "taskId": str,
-        "title": str,
-        "description": str,
-        "code": str,
-        "analysis": {
-            "score": int,
-            "comment": str,
-            "issues": [{type, detail}, ...]
-        }
-      }
-
-    history: список попыток запуска кода (из /api/compile)
-    """
 
     os.makedirs("reports", exist_ok=True)
 
     filename = f"reports/report_{candidate_name}_{uuid.uuid4().hex}.pdf"
     c = canvas.Canvas(filename, pagesize=letter)
-    width, height = letter  # noqa: F841 (на будущее)
 
     y = 760
 
@@ -123,7 +100,7 @@ def generate_report(
     c.setFillColor(colors.HexColor("#444444"))
     c.drawString(40, y, f"Кандидат: {candidate_name}")
     y -= 18
-    
+
     lang_label = "JavaScript" if track == "js" else "Python"
     c.drawString(40, y, f"Задач в сессии: {len(results)} ({lang_label})")
     y -= 25
@@ -138,15 +115,12 @@ def generate_report(
     else:
         for h in history:
             c.setFont("Roboto-Bold", 11)
-            c.setFillColor(colors.HexColor("#222222"))
             c.drawString(40, y, f"Попытка #{h.get('attempt')}")
             y -= 16
 
-            c.setFont("Roboto", 10)
-            c.setFillColor(colors.black)
-
             metrics = h.get("metrics") or {}
             time_ms = metrics.get("exec_time_ms", "N/A")
+
             rows = [
                 f"Задача: {h.get('taskId')}",
                 f"Время выполнения: {time_ms} ms",
@@ -163,59 +137,78 @@ def generate_report(
                 y = 760
 
     # ---------------------------------------------------------
-    # 2. Решения кандидата по задачам
+    # 2. Решения кандидата
     # ---------------------------------------------------------
     y = draw_subtitle(c, "2. Решения кандидата по задачам", y)
 
-    if not results:
-        y = draw_paragraph(c, "Решения кандидата отсутствуют.", y)
-    else:
-        for r in results:
-            task_header = f"Задача {r.get('taskId')} — {r.get('title')}"
-            y = draw_paragraph(c, task_header, y)
-            y = draw_paragraph(c, r.get("description", ""), y)
-            y = draw_code_block(c, r.get("code", ""), y)
-            y -= 6
-            if y < 80:
-                c.showPage()
-                y = 760
+    for r in results:
+        y = draw_paragraph(c, f"Задача {r['taskId']} — {r['title']}", y)
+        y = draw_paragraph(c, r["description"], y)
+        y = draw_code_block(c, r["code"], y)
+
+        y -= 6
+        if y < 80:
+            c.showPage()
+            y = 760
 
     # ---------------------------------------------------------
-    # 3. Анализ по задачам (LLM)
+    # 3. Анализ решений (LLM)
     # ---------------------------------------------------------
     y = draw_subtitle(c, "3. Анализ решений по задачам (LLM)", y)
 
-    if not results:
-        y = draw_paragraph(c, "Анализ отсутствует.", y)
-    else:
-        for r in results:
-            analysis = r.get("analysis") or {}
-            score = analysis.get("score", "N/A")
-            comment = analysis.get("comment", "")
-            issues = analysis.get("issues", [])
+    for r in results:
+        analysis = r["analysis"]
+        score = analysis.get("score", "N/A")
+        comment = analysis.get("comment", "")
+        issues = analysis.get("issues", [])
 
-            header = f"Задача {r.get('taskId')} — оценка: {score}/100"
-            y = draw_paragraph(c, header, y)
-            y = draw_paragraph(c, f"Комментарий: {comment}", y)
+        y = draw_paragraph(c, f"Задача {r['taskId']} — оценка: {score}/100", y)
+        y = draw_paragraph(c, f"Комментарий: {comment}", y)
 
-            if issues:
-                y = draw_paragraph(c, "Ключевые замечания:", y)
-                for issue in issues:
-                    issue_text = f"- {issue.get('type', '')}: {issue.get('detail', '')}"
-                    y = draw_paragraph(c, issue_text, y)
-            else:
-                y = draw_paragraph(c, "Замечаний для этой задачи не зафиксировано.", y)
+        if issues:
+            for issue in issues:
+                y = draw_paragraph(
+                    c,
+                    f"- {issue.get('type')}: {issue.get('detail')}",
+                    y,
+                )
+        else:
+            y = draw_paragraph(c, "Замечаний не зафиксировано.", y)
 
-            y -= 6
-            if y < 80:
-                c.showPage()
-                y = 760
+        y -= 6
+        if y < 80:
+            c.showPage()
+            y = 760
 
     # ---------------------------------------------------------
-    # 4. Итоговая оценка кандидата
+    # 4. Итоговая оценка
     # ---------------------------------------------------------
     y = draw_subtitle(c, "4. Итоговая оценка кандидата", y)
     y = draw_paragraph(c, final_summary, y)
+
+    # ---------------------------------------------------------
+    # 5. Коммуникативные ответы кандидата
+    # ---------------------------------------------------------
+    y = draw_subtitle(c, "5. Коммуникативные ответы кандидата", y)
+
+    if not communications:
+        y = draw_paragraph(c, "Коммуникативных вопросов не было.", y)
+    else:
+        for entry in communications:
+            y = draw_paragraph(c, f"Задача: {entry['taskId']}", y)
+            y = draw_paragraph(c, f"Вопрос: {entry['question']}", y)
+            y = draw_paragraph(c, f"Ответ кандидата: {entry['answer']}", y)
+            y = draw_paragraph(
+                c,
+                f"Оценка коммуникации: {entry.get('score_comm')}/100",
+                y,
+            )
+            y = draw_paragraph(c, f"{entry.get('comment_comm')}", y)
+
+            y -= 8
+            if y < 80:
+                c.showPage()
+                y = 760
 
     # ---------------------------------------------------------
     # FOOTER

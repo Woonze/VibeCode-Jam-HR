@@ -34,6 +34,13 @@ export default function Workspace() {
   const [isTyping, setIsTyping] = useState(false);
   const [interviewFinished, setInterviewFinished] = useState(false);
 
+  const [waitingCommunication, setWaitingCommunication] = useState(false);
+  const [communicationQuestion, setCommunicationQuestion] = useState("");
+  const [communicationAnswer, setCommunicationAnswer] = useState("");
+
+  const [serverMsgCount, setServerMsgCount] = useState(0);
+
+
   // === начальные сообщения ===
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -110,7 +117,11 @@ export default function Workspace() {
     setIsTyping(false);
 
     if (Array.isArray(data.messages)) {
-      setMessages((prev) => [...prev, ...data.messages]);
+      setMessages(prev => {
+        const newServer = data.messages.slice(serverMsgCount);
+        return [...prev, ...newServer];
+      });
+      setServerMsgCount(data.messages.length);
     }
 
     if (data.task) {
@@ -151,6 +162,12 @@ export default function Workspace() {
   async function onDoneButton() {
     if (!task) return;
 
+    // Если сейчас нужно отвечать на вопрос
+    if (waitingCommunication) {
+      await sendCommunicationAnswer();
+      return;
+    }
+    
     setIsTyping(true);
 
     const res = await fetch("/api/submit", {
@@ -168,7 +185,19 @@ export default function Workspace() {
     setFeedback(data);
 
     if (Array.isArray(data.messages)) {
-      setMessages(data.messages);
+      setMessages(prev => {
+        const newServer = data.messages.slice(serverMsgCount);
+        return [...prev, ...newServer];
+      });
+      setServerMsgCount(data.messages.length);
+    }
+
+
+    // если бэкенд ожидает ответ на вопрос
+    if (data.ask_communication) {
+      setWaitingCommunication(true);
+      setCommunicationQuestion(data.communication_question);
+      return;
     }
 
     if (data.task) {
@@ -180,6 +209,54 @@ export default function Workspace() {
       setInterviewFinished(true);
     }
   }
+
+  async function sendCommunicationAnswer() {
+  setMessages(prev => [
+    ...prev,
+    {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: communicationAnswer
+    }
+  ]);
+
+  setIsTyping(true);
+
+  const res = await fetch("/api/communication_answer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      answer: communicationAnswer
+    }),
+  });
+
+  const data = await res.json();
+  setIsTyping(false);
+
+  if (Array.isArray(data.messages)) {
+    setMessages(prev => {
+      const newServer = data.messages.slice(serverMsgCount);
+      return [...prev, ...newServer];
+    });
+    setServerMsgCount(data.messages.length);
+  }
+
+
+  if (data.task) {
+    setTask(data.task);
+    setValue(data.task.template);
+  }
+
+  if (data.finished) {
+    setInterviewFinished(true);
+  }
+
+  // выходим из режима общения
+  setWaitingCommunication(false);
+  setCommunicationAnswer("");
+  setCommunicationQuestion("");
+}
+
 
   // ================================
   //   Рендер
@@ -297,21 +374,44 @@ export default function Workspace() {
               {/* Chat Footer */}
               {track && task && (
                 <div className="ws-chat-footer">
-                  <button
-                    className="ws-btn ws-btn-secondary"
-                    onClick={onRunCode}
-                  >
-                    Запустить в песочнице
-                  </button>
+                  {waitingCommunication ? (
+                    <>
+                      <textarea
+                        className="ws-comm-input"
+                        placeholder="Введите ответ..."
+                        value={communicationAnswer}
+                        onChange={(e) => setCommunicationAnswer(e.target.value)}
+                        style={{
+                          width: "100%",
+                          height: "80px",
+                          resize: "none",
+                          marginBottom: 10,
+                        }}
+                      />
+                      <button
+                        className="ws-btn ws-btn-primary"
+                        onClick={sendCommunicationAnswer}
+                      >
+                        Ответить
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="ws-btn ws-btn-secondary"
+                        onClick={onRunCode}
+                      >
+                        Запустить в песочнице
+                      </button>
 
-                  <button
-                    className="ws-btn ws-btn-primary"
-                    onClick={onDoneButton}
-                  >
-                    {interviewFinished
-                      ? "Интервью завершено"
-                      : "Готово - отправить"}
-                  </button>
+                      <button
+                        className="ws-btn ws-btn-primary"
+                        onClick={onDoneButton}
+                      >
+                        {interviewFinished ? "Интервью завершено" : "Готово - отправить"}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
