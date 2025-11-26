@@ -150,6 +150,54 @@ def analyze_communication(answer: str, question: str, code: str, task_descriptio
             "score": 0,
             "comment": f"LLM communication analysis error: {e}"
         }
+    
+def analyze_soft_skill(question, template, answer):
+    prompt = f"""
+Ты senior HR-interviewer. 
+Твоя задача — оценить soft-skills кандидата по пяти метрикам.
+
+=== ВОПРОС ===
+{question}
+
+=== СИТУАЦИЯ ===
+{template}
+
+=== ОТВЕТ КАНДИДАТА ===
+{answer}
+
+Оцени по пяти категориям:
+
+1. Communication (0–100)
+2. Teamwork & Collaboration (0–100)
+3. Adaptability & Flexibility (0–100)
+4. Leadership & Initiative (0–100)
+5. Problem Solving & Critical Thinking (0–100)
+
+Сформируй поля:
+
+- "score_communication"
+- "score_teamwork"
+- "score_adaptability"
+- "score_leadership"
+- "score_problem_solving"
+
+Также:
+
+- "strengths": список положительных наблюдений
+- "weaknesses": список зон роста
+- "summary": общий вывод о soft-skills (2–3 предложения)
+
+СТРОГОЕ ТРЕБОВАНИЕ: ответ строго JSON.
+"""
+
+    resp = client.chat.completions.create(
+        model="qwen3-32b-awq",
+        response_format={"type": "json_object"},
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return json.loads(resp.choices[0].message.content)
+
 
 def analyze_anti_cheat(
     task_description: str,

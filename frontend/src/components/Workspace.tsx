@@ -33,6 +33,9 @@ export default function Workspace() {
 
   const [track, setTrack] = useState<null | "js" | "python">(null);
   const [task, setTask] = useState<Task | null>(null);
+  const [softMode, setSoftMode] = useState(false);
+  const [currentSoftTaskId, setCurrentSoftTaskId] = useState<string | null>(null);
+
 
   const [value, setValue] = useState<string>("");
   const [log, setLog] = useState<string[]>([]);
@@ -389,7 +392,11 @@ export default function Workspace() {
 
     // Если сейчас нужно отвечать на вопрос
     if (waitingCommunication) {
-      await sendCommunicationAnswer();
+      if (softMode) {
+        await sendSoftAnswer();       // <-- новый путь
+      } else {
+        await sendCommunicationAnswer();
+      }
       return;
     }
     
@@ -401,6 +408,7 @@ export default function Workspace() {
       body: JSON.stringify({
         taskId: task.id,
         code: value,
+        runResult: feedback || null
       }),
     });
 
@@ -429,6 +437,31 @@ export default function Workspace() {
       setTask(data.task);
       setValue(data.task.template);
     }
+
+    // === обработка soft-skills ===
+    if (data.soft_question) {
+      const soft = data.soft_question;
+
+      setSoftMode(true);
+      setCurrentSoftTaskId(soft.id);
+
+      setTask({
+          id: soft.id,
+          title: "Soft-skills вопрос",
+          description: soft.description,
+          language: "javascript",
+          template: soft.template
+      });
+
+      setValue(soft.template);
+
+      // ВАЖНО !!!
+      setWaitingCommunication(true);
+      setCommunicationAnswer("");
+
+      return;
+  }
+
 
     if (data.finished) {
       setInterviewFinished(true);
@@ -466,6 +499,30 @@ export default function Workspace() {
     setServerMsgCount(data.messages.length);
   }
 
+  // === если пришёл soft-вопрос после 3-й задачи ===
+  if (data.soft_question) {
+    const soft = data.soft_question;
+
+    setSoftMode(true);
+    setCurrentSoftTaskId(soft.id);
+
+    // переключаем текущую "задачу" на soft-вопрос
+    setTask({
+      id: soft.id,
+      title: "Soft-skills вопрос",
+      description: soft.description,
+      language: "javascript", // просто заглушка
+      template: soft.template,
+    });
+
+    setValue(soft.template);    // показываем шаблон справа
+    setWaitingCommunication(true);  // показываем textarea
+    setCommunicationAnswer("");     // чистим поле
+
+    // здесь НЕ завершаем интервью
+    return;
+  }
+
 
   if (data.task) {
     setTask(data.task);
@@ -481,6 +538,72 @@ export default function Workspace() {
   setCommunicationAnswer("");
   setCommunicationQuestion("");
 }
+
+async function sendSoftAnswer() {
+  if (!currentSoftTaskId) return;
+
+  // показать ответ в чате
+  setMessages(prev => [
+    ...prev,
+    {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: communicationAnswer,
+    },
+  ]);
+
+  setIsTyping(true);
+
+  const res = await fetch("/api/soft_answer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      taskId: currentSoftTaskId,
+      answer: communicationAnswer,
+    }),
+  });
+
+  const data = await res.json();
+  setIsTyping(false);
+
+  // подмешиваем сообщения сервера
+  if (Array.isArray(data.messages)) {
+    setMessages(prev => {
+      const newServer = data.messages.slice(serverMsgCount);
+      return [...prev, ...newServer];
+    });
+    setServerMsgCount(data.messages.length);
+  }
+
+  // если есть следующий soft-вопрос
+  if (data.next_question) {
+    const q = data.next_question;
+
+    setTask({
+      id: q.id,
+      title: "Soft-skills вопрос",
+      description: q.description,
+      language: "javascript",
+      template: q.template,
+    });
+
+    setValue(q.template);
+    setCurrentSoftTaskId(q.id);
+    setCommunicationAnswer("");
+    setWaitingCommunication(true);
+    return;
+  }
+
+  // если soft-интервью завершено
+  if (data.finished) {
+    setSoftMode(false);
+    setWaitingCommunication(false);
+    setInterviewFinished(true);
+  }
+
+  setCommunicationAnswer("");
+}
+
 
 
   // ================================
@@ -620,7 +743,7 @@ export default function Workspace() {
                       />
                       <button
                         className="ws-btn ws-btn-primary"
-                        onClick={sendCommunicationAnswer}
+                        onClick={onDoneButton}
                       >
                         Ответить
                       </button>
@@ -690,7 +813,9 @@ export default function Workspace() {
                   <div className="ws-panel ws-feedback-panel">
                     <div className="ws-panel-header">Результаты тестов</div>
                     <div className="ws-panel-body">
-                      {feedback && feedback.tests ? (
+                      {softMode ? (
+                        <div>Для вопросов soft-skills автотестов нет.</div>
+                      ) : feedback && feedback.tests ? (
                         <div className="ws-tests-list">
                           {/* === ВИДИМЫЕ ТЕСТЫ === */}
                           {feedback.tests

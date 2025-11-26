@@ -330,6 +330,64 @@ def generate_report(
     else:
         y = draw_paragraph(c, "Подозрительных признаков не обнаружено.", y)
 
+        # ---------------- 7. Soft-Skills интервью ----------------
+    y = draw_subtitle(c, "7. Soft-Skills интервью", y)
+
+    soft_results = final_summary.get("soft_results", [])
+
+    if not soft_results:
+        y = draw_paragraph(c, "Soft-skills вопросы не задавались.", y)
+    else:
+        for entry in soft_results:
+            y = draw_paragraph(c, f"Ситуация: {entry['taskId']}", y)
+            y = draw_paragraph(c, entry["description"], y)
+
+            # Ответ
+            y = draw_paragraph(c, "Ответ кандидата:", y)
+            y = draw_paragraph(c, entry["answer"], y)
+
+            analysis = entry["analysis"]
+
+            # Метрики
+            y = draw_paragraph(c, "---", y)
+
+            metrics = [
+                ("Коммуникация", analysis.get("communication")),
+                ("Командная работа", analysis.get("teamwork")),
+                ("Адаптивность", analysis.get("adaptability")),
+                ("Лидерство", analysis.get("leadership")),
+                ("Решение проблем", analysis.get("problem_solving")),
+            ]
+
+            for title, value in metrics:
+                if value is not None:
+                    y = draw_paragraph(
+                        c, f"- {title}: {value}/100", y
+                    )
+
+            # Итоговая оценка
+            final_score = analysis.get("final_score")
+            if final_score is not None:
+                y = draw_paragraph(
+                    c,
+                    f"Итоговая оценка soft-вопроса: {final_score}/100",
+                    y
+                )
+
+            comment = analysis.get("comment")
+            if comment:
+                y = draw_paragraph(
+                    c,
+                    f"Комментарий эксперта: {comment}",
+                    y
+                )
+
+            y -= 8
+            if y < 80:
+                c.showPage()
+                y = 760
+
+
     # ------------------------------------------------
     # FOOTER
     # ------------------------------------------------

@@ -1,5 +1,6 @@
 # backend/main.py основной файл с эндпоинтами FastAPI
 import random
+from pydantic import BaseModel
 from typing import List, Dict, Any
 
 from fastapi import FastAPI
@@ -7,11 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from models import CompileRequest, AssessRequest, AntiCheatEvent, AntiCheatAnalyze  # CompileResponse/AssessResponse можно не использовать жёстко
 from sandbox import run_js, run_py
-from llm_client import client, analyze_code, analyze_communication, analyze_anti_cheat
+from llm_client import client, analyze_code, analyze_communication, analyze_anti_cheat, analyze_soft_skill
 from report import generate_report
 from tests_runner import run_tests_js, run_tests_py
 from TEST_BANK_JS import TEST_BANK_JS
 from TEST_BANK_PY import TEST_BANK_PY
+from TASK_BANK_PY import TASK_BANK_PY
+from TASK_BANK_JS import TASK_BANK_JS
+from SOFT_SKILLS_BANK import SOFT_SKILLS_BANK
 
 import json
 
@@ -28,513 +32,8 @@ app.add_middleware(
 )
 
 # -------------------------------------------------
-# БАНК ЗАДАНИЙ
+# БАНК ЗАДАНИЙ (вынес в отедльные файлы)
 # -------------------------------------------------
-TASK_BANK_JS: Dict[str, List[Dict[str, Any]]] = {
-
-    # EASY — базовые задачи
-    "easy": [
-        {
-            "id": "js-easy-1",
-            "title": "Сортировка массива чисел",
-            "description": (
-                "Реализуйте функцию sortNumbers(arr), которая принимает массив чисел "
-                "и возвращает новый массив, отсортированный по возрастанию. "
-                "Нельзя использовать arr.sort()."
-            ),
-            "template": "function sortNumbers(arr) {\n  // Реализуйте сортировку вручную\n}\n",
-        },
-        {
-            "id": "js-easy-2",
-            "title": "Поиск минимального значения",
-            "description": (
-                "Напишите функцию minArr(arr), которая возвращает самое маленькое число в массиве. "
-                "Решить без Math.min(...arr)."
-            ),
-            "template": "function minArr(arr) {\n  // Найдите минимум вручную\n}\n",
-        },
-        {
-            "id": "js-easy-3",
-            "title": "Подсчёт количества слов",
-            "description": (
-                "Создайте функцию countWords(str), которая принимает строку и возвращает "
-                "количество слов в ней. Считайте, что слова разделяются одним пробелом."
-            ),
-            "template": "function countWords(str) {\n  // Подсчитайте количество слов\n}\n",
-        },
-        {
-            "id": "js-easy-4",
-            "title": "Проверка строки на палиндром",
-            "description": (
-                "Реализуйте функцию isPalindrome(str), которая проверяет, является ли строка "
-                "палиндромом (одинаково читается слева направо и справа налево). Игнорируйте регистр."
-            ),
-            "template": "function isPalindrome(str) {\n  // Проверьте строку\n}\n",
-        },
-        {
-            "id": "js-easy-5",
-            "title": "Удаление дубликатов",
-            "description": (
-                "Напишите функцию removeDuplicates(arr), которая удаляет повторяющиеся элементы массива "
-                "и возвращает новый массив только с уникальными значениями (сохраните порядок первых вхождений)."
-            ),
-            "template": "function removeDuplicates(arr) {\n  // Удалите дубликаты вручную\n}\n",
-        },
-        {
-            "id": "js-easy-6",
-            "title": "Сумма цифр числа",
-            "description": (
-                "Напишите функцию sumDigits(num), которая возвращает сумму всех цифр числа. "
-                "Учтите, что num может быть отрицательным."
-            ),
-            "template": "function sumDigits(num) {\n  // Разбейте число на цифры и просуммируйте\n}\n",
-        },
-        {
-            "id": "js-easy-7",
-            "title": "Реверс массива",
-            "description": (
-                "Реализуйте функцию reverseArray(arr), которая возвращает новый массив "
-                "с элементами в обратном порядке. Не используйте встроенный reverse()."
-            ),
-            "template": "function reverseArray(arr) {\n  // Переверните массив вручную\n}\n",
-        },
-        {
-            "id": "js-easy-8",
-            "title": "Фильтрация чётных чисел",
-            "description": (
-                "Создайте функцию filterEven(arr), возвращающую массив только из чётных чисел. "
-                "Нечётные числа должны быть отброшены."
-            ),
-            "template": "function filterEven(arr) {\n  // Верните только чётные значения\n}\n",
-        },
-        {
-            "id": "js-easy-9",
-            "title": "Подсчёт гласных в строке",
-            "description": (
-                "Реализуйте функцию countVowels(str), возвращающую количество гласных букв в строке. "
-                "Считайте гласными: a, e, i, o, u, а, е, ё, и, о, у, ы, э, ю, я."
-            ),
-            "template": "function countVowels(str) {\n  // Подсчитайте гласные\n}\n",
-        },
-        {
-            "id": "js-easy-10",
-            "title": "Частотный словарь массива",
-            "description": (
-                "Создайте функцию freq(arr), которая возвращает объект, где каждому "
-                "элементу массива соответствует количество его вхождений."
-            ),
-            "template": "function freq(arr) {\n  // Верните объект вида {value: count}\n}\n",
-        },
-    ],
-
-    # MEDIUM — структуры данных, строки, алгоритмы
-    "medium": [
-        {
-            "id": "js-med-1",
-            "title": "Группировка объектов по полю",
-            "description": (
-                "Реализуйте функцию groupBy(arr, key), которая группирует объекты массива arr "
-                "по значению поля key. Результат — объект, где ключи это значения key, "
-                "а значения — массивы объектов."
-            ),
-            "template": "function groupBy(arr, key) {\n  // Сгруппируйте элементы по ключу\n}\n",
-        },
-        {
-            "id": "js-med-2",
-            "title": "Проверка сбалансированности скобок",
-            "description": (
-                "Напишите функцию isBalanced(str), которая проверяет корректность скобок. "
-                "Поддерживаемые скобки: (), {}, []. Используйте стек."
-            ),
-            "template": "function isBalanced(str) {\n  // Используйте стек\n}\n",
-        },
-        {
-            "id": "js-med-3",
-            "title": "Функция-кешер",
-            "description": (
-                "Реализуйте функцию memoize(fn), которая возвращает кешированную версию fn. "
-                "Если fn уже вызывали с такими аргументами — верните результат из кеша."
-            ),
-            "template": "function memoize(fn) {\n  // Верните кешированную функцию\n}\n",
-        },
-        {
-            "id": "js-med-4",
-            "title": "Глубокое копирование объекта",
-            "description": (
-                "Напишите функцию deepClone(obj), которая выполняет глубокое копирование объекта "
-                "любой вложенности без использования structuredClone или сторонних библиотек."
-            ),
-            "template": "function deepClone(obj) {\n  // Клонируйте вручную\n}\n",
-        },
-        {
-            "id": "js-med-5",
-            "title": "Удаление falsy-значений",
-            "description": (
-                "Создайте функцию cleanArray(arr), которая удаляет все falsy значения "
-                "(false, 0, '', null, undefined, NaN)."
-            ),
-            "template": "function cleanArray(arr) {\n  // Отфильтруйте falsy значения\n}\n",
-        },
-        {
-            "id": "js-med-6",
-            "title": "Форматирование строки в camelCase",
-            "description": (
-                "Реализуйте функцию camelCase(str), которая преобразует строку вида "
-                "'hello world example' в 'helloWorldExample'."
-            ),
-            "template": "function camelCase(str) {\n  // Преобразуйте строку в camelCase\n}\n",
-        },
-        {
-            "id": "js-med-7",
-            "title": "Плоский массив",
-            "description": "Создайте функцию flatten(arr), которая превращает вложенный массив в плоский.",
-            "template": "function flatten(arr) {\n  // Разверните вложенные массивы\n}\n",
-        },
-        {
-            "id": "js-med-8",
-            "title": "Перевод числа в римские цифры",
-            "description": (
-                "Реализуйте функцию toRoman(num), преобразующую положительное целое число "
-                "в римскую запись (I, V, X, L, C, D, M)."
-            ),
-            "template": "function toRoman(num) {\n  // Преобразуйте число в римскую нотацию\n}\n",
-        },
-        {
-            "id": "js-med-9",
-            "title": "Фильтрация по диапазону",
-            "description": (
-                "Реализуйте filterRange(arr, min, max), возвращающую элементы между min и max (включительно). "
-                "Результат — новый массив."
-            ),
-            "template": "function filterRange(arr, min, max) {\n  // Верните элементы диапазона\n}\n",
-        },
-        {
-            "id": "js-med-10",
-            "title": "Анализ строки (частоты символов)",
-            "description": (
-                "Напишите функцию charFrequency(str), возвращающую объект частот символов строки. "
-                "Учитывайте регистр символов."
-            ),
-            "template": "function charFrequency(str) {\n  // Частоты символов\n}\n",
-        },
-    ],
-
-    # HARD — паттерны, продвинутые структуры и алгоритмы
-    "hard": [
-        {
-            "id": "js-hard-1",
-            "title": "Throttle function",
-            "description": (
-                "Реализуйте функцию throttle(fn, delay), которая ограничивает вызов функции fn "
-                "не чаще, чем раз в delay миллисекунд."
-            ),
-            "template": "function throttle(fn, delay) {\n  // Реализуйте throttle\n}\n",
-        },
-        {
-            "id": "js-hard-2",
-            "title": "EventEmitter",
-            "description": (
-                "Реализуйте класс EventEmitter, поддерживающий методы:\n"
-                "on(event, handler), off(event, handler), emit(event, ...args)."
-            ),
-            "template": (
-                "class EventEmitter {\n"
-                "  constructor() {\n"
-                "    this.events = {};\n"
-                "  }\n"
-                "  on(event, handler) {}\n"
-                "  off(event, handler) {}\n"
-                "  emit(event, ...args) {}\n"
-                "}\n"
-            ),
-        },
-        {
-            "id": "js-hard-3",
-            "title": "Deep Equal",
-            "description": (
-                "Реализуйте функцию deepEqual(a, b), которая сравнивает два значения "
-                "любой вложенности на полное структурное равенство."
-            ),
-            "template": "function deepEqual(a, b) {\n  // Реализуйте глубокое сравнение\n}\n",
-        },
-        {
-            "id": "js-hard-4",
-            "title": "Свой Promise",
-            "description": "Реализуйте класс MyPromise с методами then, catch, finally.",
-            "template": (
-                "class MyPromise {\n"
-                "  constructor(executor) {}\n"
-                "  then(onFulfilled, onRejected) {}\n"
-                "  catch(onRejected) {}\n"
-                "  finally(onFinally) {}\n"
-                "}\n"
-            ),
-        },
-        {
-            "id": "js-hard-5",
-            "title": "LRU Cache",
-            "description": "Реализуйте структуру данных LRUCache с методами get(key) и put(key, value).",
-            "template": (
-                "class LRUCache {\n"
-                "  constructor(capacity) {}\n"
-                "  get(key) {}\n"
-                "  put(key, value) {}\n"
-                "}\n"
-            ),
-        },
-        {
-            "id": "js-hard-6",
-            "title": "Шифрование Цезаря",
-            "description": (
-                "Реализуйте функцию caesarCipher(str, shift), которая шифрует строку "
-                "сдвигом букв по алфавиту. Сохраните регистр."
-            ),
-            "template": "function caesarCipher(str, shift) {\n  // Реализуйте алгоритм\n}\n",
-        },
-        {
-            "id": "js-hard-7",
-            "title": "Мини-база данных в памяти",
-            "description": (
-                "Реализуйте класс MiniDB, поддерживающий методы insert(obj), find(query), "
-                "update(query, patch), delete(query)."
-            ),
-            "template": (
-                "class MiniDB {\n"
-                "  constructor() {\n"
-                "    this.data = [];\n"
-                "  }\n"
-                "  insert(obj) {}\n"
-                "  find(query) {}\n"
-                "  update(query, patch) {}\n"
-                "  delete(query) {}\n"
-                "}\n"
-            ),
-        },
-        {
-            "id": "js-hard-8",
-            "title": "Планировщик задач",
-            "description": (
-                "Реализуйте функцию scheduler(tasks), где tasks — массив функций, "
-                "и каждая функция должна выполняться строго после завершения предыдущей "
-                "(поддержка async-функций)."
-            ),
-            "template": "function scheduler(tasks) {\n  // Запускайте функции последовательно\n}\n",
-        },
-        {
-            "id": "js-hard-9",
-            "title": "Parser mini-JS выражений",
-            "description": (
-                "Реализуйте функцию parseExpression(expr), которая принимает строку вида "
-                "'2 + 3 * (4 - 1)' и вычисляет результат. Требуется реализовать парсер "
-                "с поддержкой скобок и приоритетов операций."
-            ),
-            "template": "function parseExpression(expr) {\n  // Реализуйте парсер выражений\n}\n",
-        },
-        {
-            "id": "js-hard-10",
-            "title": "Своя реализация Redux Store",
-            "description": (
-                "Реализуйте createStore(reducer), возвращающую объект с методами "
-                "getState(), dispatch(action), subscribe(listener)."
-            ),
-            "template": "function createStore(reducer) {\n  // Реализуйте Redux-подобный store\n}\n",
-        },
-    ],
-}
-
-TASK_BANK_PY = {
-    "easy": [
-        {
-            "id": "py-easy-1",
-            "title": "Сложение чисел",
-            "description": "Напишите функцию add(a, b), возвращающую сумму.",
-            "template": "def add(a, b):\n    pass\n\nprint(add(1, 2))"
-        },
-        {
-            "id": "py-easy-2",
-            "title": "Максимум из двух чисел",
-            "description": "Напишите функцию max2(a, b), возвращающую большее число.",
-            "template": "def max2(a, b):\n    pass\n\nprint(max2(3, 7))"
-        },
-        {
-            "id": "py-easy-3",
-            "title": "Количество гласных",
-            "description": "Напишите функцию count_vowels(s), возвращающую количество гласных.",
-            "template": "def count_vowels(s):\n    pass\n\nprint(count_vowels('hello'))"
-        },
-        {
-            "id": "py-easy-4",
-            "title": "Палиндром",
-            "description": "Определите, является ли строка палиндромом.",
-            "template": "def is_palindrome(s):\n    pass\n\nprint(is_palindrome('level'))"
-        },
-        {
-            "id": "py-easy-5",
-            "title": "Сумма списка",
-            "description": "Реализуйте функцию sum_list(nums), возвращающую сумму элементов.",
-            "template": "def sum_list(nums):\n    pass\n\nprint(sum_list([1,2,3]))"
-        },
-        {
-            "id": "py-easy-6",
-            "title": "Разворот строки",
-            "description": "Напишите функцию reverse(s), разворачивающую строку.",
-            "template": "def reverse(s):\n    pass\n\nprint(reverse('abc'))"
-        },
-        {
-            "id": "py-easy-7",
-            "title": "Уникальные элементы",
-            "description": "Верните список уникальных элементов.",
-            "template": "def unique(nums):\n    pass\n\nprint(unique([1,2,2,3]))"
-        },
-        {
-            "id": "py-easy-8",
-            "title": "Факториал",
-            "description": "Напишите функцию factorial(n).",
-            "template": "def factorial(n):\n    pass\n\nprint(factorial(5))"
-        },
-        {
-            "id": "py-easy-9",
-            "title": "Четное или нечётное",
-            "description": "Верните 'even' или 'odd' для числа.",
-            "template": "def even_odd(n):\n    pass\n\nprint(even_odd(4))"
-        },
-        {
-            "id": "py-easy-10",
-            "title": "Поиск минимума",
-            "description": "Верните минимальное число в списке.",
-            "template": "def find_min(nums):\n    pass\n\nprint(find_min([3,1,4]))"
-        }
-    ],
-
-    "medium": [
-        {
-            "id": "py-med-1",
-            "title": "Фибоначчи",
-            "description": "Реализуйте рекурсивную или итеративную функцию fib(n).",
-            "template": "def fib(n):\n    pass\n\nprint(fib(10))"
-        },
-        {
-            "id": "py-med-2",
-            "title": "Разворот списка",
-            "description": "Реализуйте reverse_list без встроенного reversed().",
-            "template": "def reverse_list(arr):\n    pass\n\nprint(reverse_list([1,2,3]))"
-        },
-        {
-            "id": "py-med-3",
-            "title": "Подсчет слов",
-            "description": "Подсчитайте встречаемость слов в строке.",
-            "template": "def count_words(text):\n    pass\n\nprint(count_words('a b a'))"
-        },
-        {
-            "id": "py-med-4",
-            "title": "Flatten списка",
-            "description": "Реализуйте flatten для вложенных списков.",
-            "template": "def flatten(lst):\n    pass\n\nprint(flatten([1,[2,[3]]]))"
-        },
-        {
-            "id": "py-med-5",
-            "title": "Анаграмма",
-            "description": "Определите, являются ли строки анаграммами.",
-            "template": "def is_anagram(a, b):\n    pass\n\nprint(is_anagram('listen','silent'))"
-        },
-        {
-            "id": "py-med-6",
-            "title": "Удаление дубликатов",
-            "description": "Удалите дубликаты, сохранив порядок.",
-            "template": "def dedupe(nums):\n    pass\n\nprint(dedupe([1,2,2,3,1]))"
-        },
-        {
-            "id": "py-med-7",
-            "title": "Два числа дают сумму",
-            "description": "Вернуть индексы двух чисел, дающих сумму target.",
-            "template": "def two_sum(nums, target):\n    pass\n\nprint(two_sum([2,7,11,15],9))"
-        },
-        {
-            "id": "py-med-8",
-            "title": "Слияние словарей",
-            "description": "Реализуйте merge_dicts(d1, d2).",
-            "template": "def merge_dicts(d1, d2):\n    pass\n\nprint(merge_dicts({'a':1},{'b':2}))"
-        },
-        {
-            "id": "py-med-9",
-            "title": "Баланс скобок",
-            "description": "Проверить корректность скобочной последовательности.",
-            "template": "def is_valid(s):\n    pass\n\nprint(is_valid('([])'))"
-        },
-        {
-            "id": "py-med-10",
-            "title": "Группировка по ключу",
-            "description": "Сгруппируйте список словарей по значению ключа.",
-            "template": "def group_by(items, key):\n    pass\n\nprint(group_by([{'t':1},{'t':2},{'t':1}], 't'))"
-        }
-    ],
-
-    "hard": [
-        {
-            "id": "py-hard-1",
-            "title": "LRU Cache",
-            "description": "Реализуйте класс LRUCache.",
-            "template": "class LRUCache:\n    pass"
-        },
-        {
-            "id": "py-hard-2",
-            "title": "Поиск пути в графе",
-            "description": "Реализуйте DFS/BFS поиск пути между двумя вершинами.",
-            "template": "def path_exists(graph, start, end):\n    pass"
-        },
-        {
-            "id": "py-hard-3",
-            "title": "Сортировка слиянием",
-            "description": "Реализуйте merge_sort.",
-            "template": "def merge_sort(arr):\n    pass"
-        },
-        {
-            "id": "py-hard-4",
-            "title": "Мини-ORM",
-            "description": "Реализуйте простейшее хранение объектов и выборку по полям.",
-            "template": "class MiniORM:\n    pass"
-        },
-        {
-            "id": "py-hard-5",
-            "title": "Дерево поиска",
-            "description": "Реализуйте BST: insert, find, inorder.",
-            "template": "class BST:\n    pass"
-        },
-        {
-            "id": "py-hard-6",
-            "title": "LRU с TTL",
-            "description": "Реализуйте LRUCache с временем жизни ключей.",
-            "template": "class LRUCacheTTL:\n    pass"
-        },
-        {
-            "id": "py-hard-7",
-            "title": "Топ-K элементов",
-            "description": "Верните K самых больших элементов через heap.",
-            "template": "def top_k(nums, k):\n    pass"
-        },
-        {
-            "id": "py-hard-8",
-            "title": "Алгоритм Дейкстры",
-            "description": "Реализуйте dijkstra(graph, start).",
-            "template": "def dijkstra(graph, start):\n    pass"
-        },
-        {
-            "id": "py-hard-9",
-            "title": "Парсер выражений",
-            "description": "Реализуйте простой калькулятор: + - * / и скобки.",
-            "template": "def calc(expr):\n    pass"
-        },
-        {
-            "id": "py-hard-10",
-            "title": "Мини-фреймворк событий",
-            "description": "Реализуйте EventEmitter с on/off/emit.",
-            "template": "class EventEmitter:\n    pass"
-        }
-    ]
-}
-
-
-
 
 # -------------------------------------------------
 # ХРАНИЛИЩЕ ИНТЕРВЬЮ (пока одна сессия default)
@@ -599,6 +98,10 @@ async def select_track(data: dict):
     session["messages"] = []
     session["history"] = []
     session["results"] = []
+    session["soft_tasks"] = []
+    session["currentSoftIndex"] = 0
+    session["soft_results"] = []
+    session["soft_stage"] = False
     session["antiCheat"] = {
         "events": [],
         "codeSnapshots": [],
@@ -943,6 +446,78 @@ async def communication_answer(data: dict):
             "task": next_task,
             "finished": False
         }
+
+    # Техническая часть завершена — запускаем soft-skills
+    session["soft_stage"] = True
+    session["currentSoftIndex"] = 0
+    k = min(3, len(SOFT_SKILLS_BANK))  # на всякий случай, если в банке < 3
+    session["soft_tasks"] = random.sample(SOFT_SKILLS_BANK, k)
+    session["soft_results"] = []
+
+    soft_task = session["soft_tasks"][0]
+
+    session["messages"].append({
+        "role": "assistant",
+        "content": (
+            final_comment +
+            "\n\nТехническая часть интервью завершена!\n"
+            "Теперь переходим к soft-skills.\n\n"
+            f"Ситуация №1:\n{soft_task['description']}\n\n"
+            "Введите ваш ответ ниже."
+        )
+    })
+
+
+    return {
+        "messages": session["messages"],
+        "soft_question": {
+            "id": soft_task["id"],
+            "description": soft_task["description"],
+            "template": soft_task["template"]
+        },
+        "finished": False
+    }
+
+
+# -------------------------------------------------
+# /api/soft_answer — ответ на вопрос soft-skills
+# -------------------------------------------------
+class SoftAnswer(BaseModel):
+    taskId: str
+    answer: str
+    
+@app.post("/api/soft_answer")
+async def soft_answer(req: SoftAnswer):
+    session = interviews["default"]
+
+    if not session["soft_stage"]:
+        return {"error": "Soft-skills stage is not started yet."}
+
+    index = session["currentSoftIndex"]
+    tasks = session["soft_tasks"]
+
+    if index >= len(tasks):
+        return {"error": "All soft-skills tasks already completed."}
+
+    task = tasks[index]
+
+    llm_result = analyze_soft_skill(
+        question=task["description"],
+        template=task["template"],
+        answer=req.answer
+    )
+
+    # сохраняем результат
+    session["soft_results"].append({
+        "taskId": task["id"],
+        "description": task["description"],
+        "answer": req.answer,
+        "analysis": llm_result
+    })
+
+    # готовим следующий вопрос
+    session["currentSoftIndex"] += 1
+
     def format_summary_text(summary: dict) -> str:
         text = []
         text.append(f"Средняя оценка за код: {summary['average_code_score']}/100")
@@ -956,35 +531,66 @@ async def communication_answer(data: dict):
 
         return "\n".join(text)
 
-    # конец интервью
-    final_summary = build_final_summary(
-        session["results"],
-        session["communications"]
-    )
+    # если были последние
+    if session["currentSoftIndex"] >= len(tasks):
+        session["soft_stage"] = False
+
+        # Финальный суммарный отчёт с учётом soft-skills
+        final_summary = build_final_summary(
+            session["results"],
+            session["communications"],
+            session["soft_results"]
+        )
+
+        final_summary_text = format_summary_text(final_summary)
+
+        session["messages"].append({
+            "role": "assistant",
+            "content": (
+                "Soft-skills интервью завершено!\n\n"
+                "Итог интервью:\n" + final_summary_text
+            )
+        })
+
+        pdf_path = generate_report(
+            candidate_name="Candidate_1",
+            results=session["results"],
+            history=session["history"],
+            final_summary=final_summary,
+            track=session["track"],
+            communications=session["communications"],
+            anti_cheat_data=session["antiCheat"]
+        )
+
+        return {
+            "messages": session["messages"],
+            "report": pdf_path,
+            "finished": True
+        }
 
 
-    final_summary_text = format_summary_text(final_summary)
+    # иначе отправляем следующий вопрос
+    next_task = tasks[session["currentSoftIndex"]]
 
     session["messages"].append({
         "role": "assistant",
-        "content": final_comment + "\n\nИтог интервью:\n" + final_summary_text
+        "content": (
+            f"Спасибо за ответ!\n\n"
+            f"Следующая ситуация:\n{next_task['description']}\n\n"
+            "Введите ваш ответ ниже."
+        )
     })
-
-    pdf_path = generate_report(
-        candidate_name="Candidate_1",
-        results=session["results"],
-        history=session["history"],
-        final_summary=final_summary,
-        track=session["track"],
-        communications=session["communications"],
-        anti_cheat_data=session["antiCheat"]
-    )
 
     return {
         "messages": session["messages"],
-        "report": pdf_path,
-        "finished": True
+        "soft_finished": False,
+        "next_question": {
+            "id": next_task["id"],
+            "description": next_task["description"],
+            "template": next_task["template"]
+        }
     }
+
 
 
 # -------------------------------------------------
@@ -1090,7 +696,7 @@ async def anti_cheat_analyze(req: AntiCheatAnalyze):
 # -------------------------------------------------
 # Вспомогательная функция: финальное резюме
 # -------------------------------------------------
-def build_final_summary(results: List[Dict[str, Any]], communications: List[Dict[str, Any]]) -> dict:
+def build_final_summary(results: List[Dict[str, Any]], communications: List[Dict[str, Any]], soft_results) -> dict:
     """
     Возвращает финальный отчёт:
     {
@@ -1134,6 +740,9 @@ def build_final_summary(results: List[Dict[str, Any]], communications: List[Dict
 ОЦЕНКИ КОММУНИКАЦИИ:
 {json.dumps(communications, ensure_ascii=False, indent=2)}
 
+ОЦЕНКИ SOFT-SKILLS:
+{json.dumps(soft_results, ensure_ascii=False, indent=2)}
+
 Сформируй разнообразный, НЕ шаблонный отчёт.
 
 Формат JSON:
@@ -1162,5 +771,6 @@ def build_final_summary(results: List[Dict[str, Any]], communications: List[Dict
     return {
         "average_code_score": avg_code,
         "average_comm_score": avg_comm,
+        "soft_results": soft_results,
         **parsed
     }
