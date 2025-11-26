@@ -85,6 +85,7 @@ def generate_report(
     results: List[Dict[str, Any]],
     history: List[Dict[str, Any]],
     final_summary: str,
+    track: str,
 ) -> str:
     """
     Создание красивого PDF-отчёта по интервью.
@@ -122,7 +123,9 @@ def generate_report(
     c.setFillColor(colors.HexColor("#444444"))
     c.drawString(40, y, f"Кандидат: {candidate_name}")
     y -= 18
-    c.drawString(40, y, f"Задач в сессии: {len(results)} (JavaScript)")
+    
+    lang_label = "JavaScript" if track == "js" else "Python"
+    c.drawString(40, y, f"Задач в сессии: {len(results)} ({lang_label})")
     y -= 25
 
     # ---------------------------------------------------------

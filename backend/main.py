@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from models import CompileRequest, AssessRequest  # CompileResponse/AssessResponse можно не использовать жёстко
-from sandbox import run_js
+from sandbox import run_js, run_py
 from llm_client import analyze_code
 from report import generate_report
 
@@ -25,7 +25,7 @@ app.add_middleware(
 # -------------------------------------------------
 # БАНК ЗАДАНИЙ
 # -------------------------------------------------
-TASK_BANK: Dict[str, List[Dict[str, Any]]] = {
+TASK_BANK_JS: Dict[str, List[Dict[str, Any]]] = {
 
     # EASY — базовые задачи
     "easy": [
@@ -337,11 +337,41 @@ TASK_BANK: Dict[str, List[Dict[str, Any]]] = {
     ],
 }
 
+TASK_BANK_PY = {
+    "easy": [
+        {
+            "id": "py-easy-1",
+            "title": "Сложение чисел",
+            "description": "Напишите функцию add(a, b), возвращающую сумму.",
+            "template": "def add(a, b):\n    pass\n\nprint(add(1, 2))"
+        }
+    ],
+    "medium": [
+        {
+            "id": "py-med-1",
+            "title": "Фибоначчи",
+            "description": "Реализуйте рекурсивную или итеративную функцию fib(n).",
+            "template": "def fib(n):\n    pass\n\nprint(fib(10))"
+        }
+    ],
+    "hard": [
+        {
+            "id": "py-hard-1",
+            "title": "LRU Cache",
+            "description": "Реализуйте класс LRUCache.",
+            "template": "class LRUCache:\n    pass"
+        }
+    ],
+}
+
+
+
 # -------------------------------------------------
 # ХРАНИЛИЩЕ ИНТЕРВЬЮ (пока одна сессия default)
 # -------------------------------------------------
 interviews: Dict[str, Dict[str, Any]] = {
     "default": {
+        "track": None,
         "taskNumber": 0,
         "messages": [],
         "history": [],   # все попытки (компиляции) по ходу интервью
@@ -372,6 +402,27 @@ def fix_encoding(text: str | None) -> str | None:
             continue
     return text
 
+# -------------------------------------------------
+# /api/select_track — выбор направления (js/python)
+# -------------------------------------------------
+@app.post("/api/select_track")
+async def select_track(data: dict):
+    track = data.get("track")  # "js" / "python"
+
+    session = interviews["default"]
+    session["track"] = track
+    session["taskNumber"] = 0
+    session["messages"] = []
+    session["history"] = []
+    session["results"] = []
+
+    session["messages"].append({
+        "role": "assistant",
+        "content": "Вы выбрали направление: " +
+                   ("JavaScript" if track == "js" else "Python")
+    })
+
+    return {"ok": True}
 
 # -------------------------------------------------
 # /api/start_interview — старт сессии
@@ -379,6 +430,12 @@ def fix_encoding(text: str | None) -> str | None:
 @app.post("/api/start_interview")
 async def start_interview():
     session = interviews["default"]
+    track = session["track"]
+
+    if track == "js":
+        bank = TASK_BANK_JS
+    else:
+        bank = TASK_BANK_PY
 
     session["taskNumber"] = 1
     session["messages"] = []
@@ -386,12 +443,13 @@ async def start_interview():
     session["results"] = []
 
     # выдаём лёгкое задание
-    task = random.choice(TASK_BANK["easy"])
+    task = random.choice(bank["easy"])
     session["currentTask"] = task
+    task["language"] = session["track"]
 
     session["messages"].append({
         "role": "assistant",
-        "content": "Привет! Начинаем техническое интервью. Тебя ждёт 3 задачи по JavaScript.",
+        "content": "Привет! Начинаем техническое интервью. Тебя ждёт 3 задачи.",
     })
     session["messages"].append({
         "role": "assistant",
@@ -411,11 +469,20 @@ async def start_interview():
 async def compile_code(req: CompileRequest):
     session = interviews["default"]
 
-    if req.language != "javascript":
+    lang = req.language
+
+    if lang == "javascript":
+        return run_js(req.code)
+
+    elif lang == "python":
+        return run_py(req.code)
+
+    else:
         return {"error": "Unsupported language"}
 
     # запускаем код в песочнице
-    result = run_js(req.code)
+    run = run_js if session["track"] == "js" else run_py
+    result = run(req.code)
 
     # аккуратно чиним кодировку stdout/stderr
     raw_stdout = result.get("stdout")
@@ -446,6 +513,9 @@ async def compile_code(req: CompileRequest):
 @app.post("/api/submit")
 async def submit(req: AssessRequest):
     session = interviews["default"]
+    track = session["track"]
+    bank = TASK_BANK_JS if track == "js" else TASK_BANK_PY
+
     task = session.get("currentTask")
 
     if not task:
@@ -495,9 +565,11 @@ async def submit(req: AssessRequest):
         session["taskNumber"] += 1
 
         if session["taskNumber"] == 2:
-            next_task = random.choice(TASK_BANK["medium"])
+            next_task = random.choice(bank["medium"])
         else:
-            next_task = random.choice(TASK_BANK["hard"])
+            next_task = random.choice(bank["hard"])
+        
+        next_task["language"] = session["track"]
 
         session["currentTask"] = next_task
 
@@ -533,6 +605,7 @@ async def submit(req: AssessRequest):
         results=session["results"],
         history=session["history"],
         final_summary=final_summary,
+        track=session["track"]
     )
 
     return {
