@@ -40,6 +40,224 @@ export default function Workspace() {
 
   const [serverMsgCount, setServerMsgCount] = useState(0);
 
+  // === Античит: состояние ===
+  const [antiCheatData, setAntiCheatData] = useState({
+    pasteCount: 0,
+    tabSwitchCount: 0,
+    codeSnapshots: [] as Array<{ timestamp: number; code: string; length: number }>,
+    lastAnalysisTime: Date.now(),
+  });
+
+  // === Античит: отслеживание вставок из буфера обмена ===
+  // Используем ref для хранения предыдущей длины кода
+  const prevCodeLengthRef = useRef<number>(0);
+  const pasteTimeoutRef = useRef<number | null>(null);
+
+  // Инициализируем длину при установке задачи
+  useEffect(() => {
+    if (task) {
+      prevCodeLengthRef.current = value.length;
+    }
+  }, [task]);
+
+  // Отслеживаем изменения в коде для определения вставок
+  useEffect(() => {
+    if (!task || prevCodeLengthRef.current === 0) {
+      prevCodeLengthRef.current = value.length;
+      return;
+    }
+
+    const currentLength = value.length;
+    const prevLength = prevCodeLengthRef.current;
+    const change = currentLength - prevLength;
+
+    // Если код увеличился более чем на 15 символов за раз - вероятно вставка
+    if (change > 15 && prevLength > 0) {
+      // Очищаем предыдущий таймаут, если он есть
+      if (pasteTimeoutRef.current) {
+        clearTimeout(pasteTimeoutRef.current);
+      }
+
+      // Используем таймаут для группировки быстрых изменений
+      pasteTimeoutRef.current = window.setTimeout(() => {
+        const newPasteCount = antiCheatData.pasteCount + 1;
+        console.log("[Античит] Обнаружена вставка из буфера обмена:", {
+          taskId: task.id,
+          pasteCount: newPasteCount,
+          codeLengthChange: change,
+          timestamp: new Date().toISOString(),
+        });
+
+        setAntiCheatData(prev => ({
+          ...prev,
+          pasteCount: newPasteCount,
+        }));
+
+        fetch("/api/anti_cheat_event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            eventType: "paste",
+            timestamp: Date.now(),
+            taskId: task.id,
+          }),
+        })
+          .then(() => {
+            console.log("[Античит] Событие вставки отправлено на сервер");
+          })
+          .catch((error) => {
+            console.error("[Античит] Ошибка при отправке события вставки:", error);
+          });
+      }, 100);
+    }
+
+    prevCodeLengthRef.current = currentLength;
+
+    return () => {
+      if (pasteTimeoutRef.current) {
+        clearTimeout(pasteTimeoutRef.current);
+      }
+    };
+  }, [value, task]);
+
+  // === Античит: отслеживание выхода из вкладки ===
+  useEffect(() => {
+    if (!task) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        const newTabSwitchCount = antiCheatData.tabSwitchCount + 1;
+        console.log("[Античит] Обнаружен выход из вкладки (visibilitychange):", {
+          taskId: task.id,
+          tabSwitchCount: newTabSwitchCount,
+          timestamp: new Date().toISOString(),
+        });
+
+        setAntiCheatData(prev => ({
+          ...prev,
+          tabSwitchCount: newTabSwitchCount,
+        }));
+
+        fetch("/api/anti_cheat_event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            eventType: "tab_switch",
+            timestamp: Date.now(),
+            taskId: task.id,
+          }),
+        })
+          .then(() => {
+            console.log("[Античит] Событие выхода из вкладки отправлено на сервер");
+          })
+          .catch((error) => {
+            console.error("[Античит] Ошибка при отправке события выхода из вкладки:", error);
+          });
+      }
+    };
+
+    const handleBlur = () => {
+      const newTabSwitchCount = antiCheatData.tabSwitchCount + 1;
+      console.log("[Античит] Обнаружен выход из окна (blur):", {
+        taskId: task.id,
+        tabSwitchCount: newTabSwitchCount,
+        timestamp: new Date().toISOString(),
+      });
+
+      setAntiCheatData(prev => ({
+        ...prev,
+        tabSwitchCount: newTabSwitchCount,
+      }));
+
+      fetch("/api/anti_cheat_event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventType: "window_blur",
+          timestamp: Date.now(),
+          taskId: task.id,
+        }),
+      })
+        .then(() => {
+          console.log("[Античит] Событие выхода из окна отправлено на сервер");
+        })
+        .catch((error) => {
+          console.error("[Античит] Ошибка при отправке события выхода из окна:", error);
+        });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [task]);
+
+  // === Античит: периодический анализ кода каждые 20 секунд ===
+  useEffect(() => {
+    if (!task || interviewFinished) return;
+
+    console.log("[Античит] Запущен периодический анализ кода (каждые 20 секунд) для задачи:", task.id);
+
+    const interval = setInterval(() => {
+      const currentCode = value;
+      const timestamp = Date.now();
+      const codeLength = currentCode.length;
+
+      console.log("[Античит] Выполняется периодический анализ кода:", {
+        taskId: task.id,
+        codeLength,
+        timestamp: new Date(timestamp).toISOString(),
+        snapshotNumber: antiCheatData.codeSnapshots.length + 1,
+      });
+
+      // Сохраняем снимок кода
+      setAntiCheatData(prev => ({
+        ...prev,
+        codeSnapshots: [
+          ...prev.codeSnapshots,
+          {
+            timestamp,
+            code: currentCode,
+            length: codeLength,
+          },
+        ],
+        lastAnalysisTime: timestamp,
+      }));
+
+      // Отправляем на анализ
+      fetch("/api/anti_cheat_analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: task.id,
+          code: currentCode,
+          codeLength: codeLength,
+          timestamp,
+          taskDescription: task.description,
+        }),
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          console.log("[Античит] Результат анализа кода получен:", {
+            taskId: task.id,
+            cheatingProbability: data.analysis?.cheating_probability,
+            riskLevel: data.analysis?.risk_level,
+            suspiciousEventsCount: data.analysis?.suspicious_events?.length || 0,
+          });
+        })
+        .catch((error) => {
+          console.error("[Античит] Ошибка при отправке анализа кода:", error);
+        });
+    }, 20000); // 20 секунд
+
+    return () => {
+      console.log("[Античит] Периодический анализ кода остановлен для задачи:", task.id);
+      clearInterval(interval);
+    };
+  }, [task, value, interviewFinished]);
 
   // === начальные сообщения ===
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -438,6 +656,9 @@ export default function Workspace() {
                       value={value}
                       onChange={(v) => setValue(v || "")}
                       theme="vs-dark"
+                      onMount={(editor) => {
+                        editorRef.current = editor;
+                      }}
                     />
                   </div>
                 </div>

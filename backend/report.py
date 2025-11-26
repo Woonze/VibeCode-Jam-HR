@@ -81,7 +81,8 @@ def generate_report(
     history: List[Dict[str, Any]],
     final_summary: str,
     track: str,
-    communications: List[Dict[str, Any]],   # <-- ДОБАВЛЕНО!!!
+    communications: List[Dict[str, Any]],
+    anti_cheat_data: Dict[str, Any],   # <-- ДОБАВЛЕНО!!!
 ) -> str:
 
     os.makedirs("reports", exist_ok=True)
@@ -210,6 +211,71 @@ def generate_report(
                 c.showPage()
                 y = 760
 
+    # ---------------------------------------------------------
+    # 6. Анализ античита
+    # ---------------------------------------------------------
+    y = draw_subtitle(c, "6. Анализ античита", y)
+    
+    stats = anti_cheat_data.get("statistics", {})
+    total_paste = stats.get("total_paste_count", 0)
+    total_tab_switch = stats.get("total_tab_switch_count", 0)
+    total_analyses = stats.get("total_analyses", 0)
+    
+    y = draw_paragraph(
+        c,
+        f"Общая статистика: вставок из буфера - {total_paste}, выходов из вкладки - {total_tab_switch}, анализов кода - {total_analyses}",
+        y
+    )
+    
+    analyses = anti_cheat_data.get("analyses", [])
+    if analyses:
+        # Группируем по задачам
+        task_analyses: Dict[str, List[Dict[str, Any]]] = {}
+        for analysis in analyses:
+            task_id = analysis.get("taskId", "unknown")
+            if task_id not in task_analyses:
+                task_analyses[task_id] = []
+            task_analyses[task_id].append(analysis)
+        
+        for task_id, task_analysis_list in task_analyses.items():
+            # Берем последний анализ для каждой задачи
+            last_analysis = task_analysis_list[-1]
+            analysis_result = last_analysis.get("analysis", {})
+            
+            cheating_prob = analysis_result.get("cheating_probability", 0)
+            risk_level = analysis_result.get("risk_level", "low")
+            comment = analysis_result.get("comment", "")
+            suspicious_events = analysis_result.get("suspicious_events", [])
+            
+            y = draw_paragraph(c, f"Задача: {task_id}", y)
+            y = draw_paragraph(
+                c,
+                f"Вероятность списывания: {cheating_prob}% (уровень риска: {risk_level})",
+                y
+            )
+            
+            if comment:
+                y = draw_paragraph(c, f"Комментарий: {comment}", y)
+            
+            if suspicious_events:
+                y = draw_paragraph(c, "Подозрительные события:", y)
+                for event in suspicious_events:
+                    event_type = event.get("type", "")
+                    event_desc = event.get("description", "")
+                    event_severity = event.get("severity", "")
+                    y = draw_paragraph(
+                        c,
+                        f"  - {event_type} ({event_severity}): {event_desc}",
+                        y
+                    )
+            
+            y -= 8
+            if y < 80:
+                c.showPage()
+                y = 760
+    else:
+        y = draw_paragraph(c, "Анализы античита отсутствуют.", y)
+    
     # ---------------------------------------------------------
     # FOOTER
     # ---------------------------------------------------------

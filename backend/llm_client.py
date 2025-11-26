@@ -60,3 +60,104 @@ REQUIRE STRICT JSON RESPONSE:
             "comment": "LLM returned invalid JSON",
             "issues": [{"type": "llm", "detail": text}]
         }
+
+def analyze_anti_cheat(
+    task_description: str,
+    code: str,
+    paste_count: int,
+    tab_switch_count: int,
+    code_snapshots: list
+):
+    """Анализирует код и события на предмет списывания"""
+    print(f"[Античит LLM] Начало анализа античита")
+    print(f"[Античит LLM] Параметры: вставок={paste_count}, выходов={tab_switch_count}, снимков={len(code_snapshots)}")
+    
+    system_prompt = (
+        "/no_think Ты - система античит для технического интервью. "
+        "Проанализируй код кандидата и события (вставки из буфера, выходы из вкладки) "
+        "на предмет списывания. Оцени вероятность списывания от 0 до 100. "
+        "Предоставь ТОЛЬКО JSON. Строго JSON!"
+    )
+
+    # Анализируем изменения в коде
+    code_changes_summary = ""
+    if len(code_snapshots) > 1:
+        prev_length = code_snapshots[0].get("codeLength", code_snapshots[0].get("length", 0))
+        for i, snapshot in enumerate(code_snapshots[1:], 1):
+            curr_length = snapshot.get("codeLength", snapshot.get("length", 0))
+            change = curr_length - prev_length
+            if abs(change) > 50:  # Значительное изменение
+                code_changes_summary += f"\nСнимок {i}: изменение размера кода на {change} символов"
+            prev_length = curr_length
+
+    user_prompt = f"""
+ОПИСАНИЕ ЗАДАЧИ:
+{task_description}
+
+ТЕКУЩИЙ КОД КАНДИДАТА:
+{code[:1000]}
+
+СТАТИСТИКА СОБЫТИЙ:
+- Количество вставок из буфера обмена: {paste_count}
+- Количество выходов из вкладки/окна: {tab_switch_count}
+- Количество снимков кода: {len(code_snapshots)}
+
+АНАЛИЗ ИЗМЕНЕНИЙ КОДА:
+{code_changes_summary if code_changes_summary else "Недостаточно данных для анализа изменений"}
+
+ЗАДАЧА:
+Определи вероятность списывания на основе:
+1. Слишком быстрых и больших изменений в коде (подозрительно, если код вырос на 200+ символов за короткое время)
+2. Множественных вставок из буфера обмена (подозрительно, если > 3 вставок)
+3. Частых выходов из вкладки (подозрительно, если > 5 раз)
+4. Наличия готовых решений из интернета (комментарии, структура кода)
+
+REQUIRE STRICT JSON RESPONSE:
+{{
+  "cheating_probability": number,  // 0-100, вероятность списывания
+  "risk_level": string,  // "low" | "medium" | "high"
+  "comment": string,  // подробный комментарий
+  "suspicious_events": [
+    {{ "type": string, "description": string, "severity": string }}
+  ],
+  "statistics": {{
+    "paste_count": number,
+    "tab_switch_count": number,
+    "code_snapshots_count": number
+  }}
+}}
+"""
+
+    print(f"[Античит LLM] Отправка запроса в LLM...")
+    resp = client.chat.completions.create(
+        model="qwen3-coder-30b-a3b-instruct-fp8",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.2,
+        max_tokens=1000,
+    )
+
+    text = resp.choices[0].message.content
+    print(f"[Античит LLM] Получен ответ от LLM (длина: {len(text)} символов)")
+
+    import json
+    try:
+        result = json.loads(text)
+        print(f"[Античит LLM] Результат успешно распарсен: вероятность={result.get('cheating_probability')}%, риск={result.get('risk_level')}")
+        return result
+    except Exception as e:
+        print(f"[Античит LLM] Ошибка парсинга JSON: {e}")
+        print(f"[Античит LLM] Ответ LLM: {text[:200]}...")
+        return {
+            "cheating_probability": 0,
+            "risk_level": "low",
+            "comment": "LLM returned invalid JSON",
+            "suspicious_events": [],
+            "statistics": {
+                "paste_count": paste_count,
+                "tab_switch_count": tab_switch_count,
+                "code_snapshots_count": len(code_snapshots)
+            }
+        }

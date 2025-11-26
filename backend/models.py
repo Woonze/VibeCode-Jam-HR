@@ -29,3 +29,15 @@ class ChatMessage(BaseModel):
     role: str  # "system" | "assistant" | "user"
     content: str
     timestamp: float
+
+class AntiCheatEvent(BaseModel):
+    eventType: str  # "paste" | "tab_switch" | "window_blur"
+    timestamp: int
+    taskId: str
+
+class AntiCheatAnalyze(BaseModel):
+    taskId: str
+    code: str
+    codeLength: int
+    timestamp: int
+    taskDescription: str

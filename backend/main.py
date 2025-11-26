@@ -5,9 +5,9 @@ from typing import List, Dict, Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import CompileRequest, AssessRequest  # CompileResponse/AssessResponse можно не использовать жёстко
+from models import CompileRequest, AssessRequest, AntiCheatEvent, AntiCheatAnalyze  # CompileResponse/AssessResponse можно не использовать жёстко
 from sandbox import run_js, run_py
-from llm_client import analyze_code
+from llm_client import analyze_code, analyze_anti_cheat
 from report import generate_report
 
 app = FastAPI()
@@ -380,7 +380,17 @@ interviews: Dict[str, Dict[str, Any]] = {
         "waitingCommunication": False,
         "lastCommunicationQuestion": None,
         "pendingResult": None,
-        "communications": []
+        "communications": [],
+        "antiCheat": {  # данные античита
+            "events": [],  # все события (вставки, выходы из вкладки)
+            "codeSnapshots": [],  # снимки кода для анализа
+            "analyses": [],  # результаты анализа LLM
+            "statistics": {
+                "total_paste_count": 0,
+                "total_tab_switch_count": 0,
+                "total_analyses": 0
+            }
+        }
     }
 }
 
@@ -419,6 +429,16 @@ async def select_track(data: dict):
     session["messages"] = []
     session["history"] = []
     session["results"] = []
+    session["antiCheat"] = {
+        "events": [],
+        "codeSnapshots": [],
+        "analyses": [],
+        "statistics": {
+            "total_paste_count": 0,
+            "total_tab_switch_count": 0,
+            "total_analyses": 0
+        }
+    }
 
     session["messages"].append({
         "role": "assistant",
@@ -445,6 +465,18 @@ async def start_interview():
     session["messages"] = []
     session["history"] = []
     session["results"] = []
+    # Античит уже инициализирован в select_track, но на всякий случай проверяем
+    if "antiCheat" not in session:
+        session["antiCheat"] = {
+            "events": [],
+            "codeSnapshots": [],
+            "analyses": [],
+            "statistics": {
+                "total_paste_count": 0,
+                "total_tab_switch_count": 0,
+                "total_analyses": 0
+            }
+        }
 
     # выдаём лёгкое задание
     task = random.choice(bank["easy"])
@@ -735,7 +767,8 @@ async def communication_answer(data: dict):
         history=session["history"],
         final_summary=final_summary,
         track=session["track"],
-        communications=session["communications"]
+        communications=session["communications"],
+        anti_cheat_data=session["antiCheat"]
     )
 
     return {
@@ -751,6 +784,98 @@ async def communication_answer(data: dict):
 @app.get("/api/messages")
 async def get_messages():
     return interviews["default"]["messages"]
+
+
+# -------------------------------------------------
+# /api/anti_cheat_event — обработка события античита
+# -------------------------------------------------
+@app.post("/api/anti_cheat_event")
+async def anti_cheat_event(req: AntiCheatEvent):
+    session = interviews["default"]
+    anti_cheat = session["antiCheat"]
+    
+    print(f"[Античит] Получено событие: {req.eventType} для задачи {req.taskId} в {req.timestamp}")
+    
+    # Сохраняем событие
+    event_data = {
+        "eventType": req.eventType,
+        "timestamp": req.timestamp,
+        "taskId": req.taskId,
+    }
+    anti_cheat["events"].append(event_data)
+    
+    # Обновляем статистику
+    if req.eventType == "paste":
+        anti_cheat["statistics"]["total_paste_count"] += 1
+        print(f"[Античит] Общее количество вставок: {anti_cheat['statistics']['total_paste_count']}")
+    elif req.eventType in ("tab_switch", "window_blur"):
+        anti_cheat["statistics"]["total_tab_switch_count"] += 1
+        print(f"[Античит] Общее количество выходов из вкладки: {anti_cheat['statistics']['total_tab_switch_count']}")
+    
+    print(f"[Античит] Событие сохранено. Всего событий: {len(anti_cheat['events'])}")
+    return {"ok": True}
+
+
+# -------------------------------------------------
+# /api/anti_cheat_analyze — анализ кода на списывание
+# -------------------------------------------------
+@app.post("/api/anti_cheat_analyze")
+async def anti_cheat_analyze(req: AntiCheatAnalyze):
+    session = interviews["default"]
+    anti_cheat = session["antiCheat"]
+    
+    print(f"[Античит] Начало анализа кода для задачи {req.taskId}")
+    print(f"[Античит] Длина кода: {req.codeLength} символов")
+    
+    # Сохраняем снимок кода
+    snapshot = {
+        "timestamp": req.timestamp,
+        "code": req.code,
+        "codeLength": req.codeLength,
+        "taskId": req.taskId,
+    }
+    anti_cheat["codeSnapshots"].append(snapshot)
+    print(f"[Античит] Снимок кода сохранен. Всего снимков: {len(anti_cheat['codeSnapshots'])}")
+    
+    # Получаем статистику событий для текущей задачи
+    task_events = [e for e in anti_cheat["events"] if e.get("taskId") == req.taskId]
+    paste_count = len([e for e in task_events if e.get("eventType") == "paste"])
+    tab_switch_count = len([e for e in task_events if e.get("eventType") in ("tab_switch", "window_blur")])
+    
+    print(f"[Античит] Статистика для задачи {req.taskId}:")
+    print(f"  - Вставок из буфера: {paste_count}")
+    print(f"  - Выходов из вкладки: {tab_switch_count}")
+    
+    # Получаем снимки кода для текущей задачи
+    task_snapshots = [s for s in anti_cheat["codeSnapshots"] if s.get("taskId") == req.taskId]
+    print(f"  - Снимков кода: {len(task_snapshots)}")
+    
+    # Анализируем через LLM
+    print(f"[Античит] Отправка запроса в LLM для анализа...")
+    analysis_result = analyze_anti_cheat(
+        task_description=req.taskDescription,
+        code=req.code,
+        paste_count=paste_count,
+        tab_switch_count=tab_switch_count,
+        code_snapshots=task_snapshots
+    )
+    
+    print(f"[Античит] Результат анализа LLM:")
+    print(f"  - Вероятность списывания: {analysis_result.get('cheating_probability', 'N/A')}%")
+    print(f"  - Уровень риска: {analysis_result.get('risk_level', 'N/A')}")
+    print(f"  - Подозрительных событий: {len(analysis_result.get('suspicious_events', []))}")
+    
+    # Сохраняем результат анализа
+    analysis_data = {
+        "timestamp": req.timestamp,
+        "taskId": req.taskId,
+        "analysis": analysis_result,
+    }
+    anti_cheat["analyses"].append(analysis_data)
+    anti_cheat["statistics"]["total_analyses"] += 1
+    print(f"[Античит] Анализ сохранен. Всего анализов: {anti_cheat['statistics']['total_analyses']}")
+    
+    return {"ok": True, "analysis": analysis_result}
 
 
 # -------------------------------------------------
