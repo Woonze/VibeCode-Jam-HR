@@ -22,6 +22,47 @@ import json
 app = FastAPI()
 
 # -------------------------------------------------
+# Функция для генерации нейтральных сообщений для кандидата
+# -------------------------------------------------
+def get_neutral_message(context: str = "default") -> str:
+    """Генерирует нейтральное сообщение для кандидата без оценок и метрик"""
+    messages = {
+        "code_submitted": [
+            "Отлично! Ваше решение получено. Давайте перейдем к следующему этапу.",
+            "Спасибо за решение! Теперь давайте обсудим ваш подход.",
+            "Решение принято. Переходим к обсуждению.",
+        ],
+        "communication_answered": [
+            "Спасибо за ответ! Отлично, давайте продолжим.",
+            "Понятно, спасибо за пояснение. Переходим дальше.",
+            "Хорошо, ваш ответ учтен. Продолжаем интервью.",
+        ],
+        "task_completed": [
+            "Отлично! Задача выполнена. Переходим к следующему заданию.",
+            "Хорошая работа! Теперь следующее задание.",
+            "Задача завершена. Переходим к следующему этапу.",
+        ],
+        "soft_answered": [
+            "Спасибо за ответ! Переходим к следующей ситуации.",
+            "Понятно, спасибо. Следующий вопрос.",
+            "Хорошо, ваш ответ учтен. Продолжаем.",
+        ],
+        "interview_finished": [
+            "Интервью завершено! Спасибо за участие. Результаты будут отправлены вам позже.",
+            "Отлично! Интервью завершено. Результаты будут обработаны и отправлены.",
+            "Спасибо за прохождение интервью! Результаты будут готовы в ближайшее время.",
+        ],
+        "default": [
+            "Отлично! Продолжаем.",
+            "Хорошо, переходим дальше.",
+            "Спасибо, продолжаем интервью.",
+        ]
+    }
+    
+    options = messages.get(context, messages["default"])
+    return random.choice(options)
+
+# -------------------------------------------------
 # CORS (для фронта)
 # -------------------------------------------------
 app.add_middleware(
@@ -309,14 +350,10 @@ async def submit(req: AssessRequest):
         }
     }
 
-    # сообщение в чат
+    # сообщение в чат (нейтральное, без оценок)
     session["messages"].append({
         "role": "assistant",
-        "content": (
-            f"Разбор решения по задаче {task['id']} ({task['title']}):\n"
-            f"Оценка за код: {score_code}/100\n"
-            f"{comment_code}"
-        )
+        "content": get_neutral_message("code_submitted")
     })
 
     # задаём вопрос по коммуникации
@@ -417,14 +454,10 @@ async def communication_answer(data: dict):
     comm_entry["comment_comm"] = comm_comment
 
 
-    # показываем ответ в чате
+    # показываем нейтральное сообщение в чате (без оценок)
     session["messages"].append({
         "role": "assistant",
-        "content": (
-            f"Разбор ответа:\n"
-            f"Оценка коммуникации: {comm_score}/100\n"
-            f"{comm_comment}"
-        )
+        "content": get_neutral_message("communication_answered")
     })
 
     # Достаём результаты предыдущего анализа кода
@@ -473,7 +506,7 @@ async def communication_answer(data: dict):
         session["messages"].append({
             "role": "assistant",
             "content": (
-                final_comment +
+                get_neutral_message("task_completed") +
                 f"\n\nТеперь задание №{session['taskNumber']}:\n"
                 f"{next_task['description']}"
             )
@@ -497,7 +530,7 @@ async def communication_answer(data: dict):
     session["messages"].append({
         "role": "assistant",
         "content": (
-            final_comment +
+            get_neutral_message("task_completed") +
             "\n\nТехническая часть интервью завершена!\n"
             "Теперь переходим к soft-skills.\n\n"
             f"Ситуация №1:\n{soft_task['description']}\n\n"
@@ -585,10 +618,7 @@ async def soft_answer(req: SoftAnswer):
 
         session["messages"].append({
             "role": "assistant",
-            "content": (
-                "Soft-skills интервью завершено!\n\n"
-                "Итог интервью:\n" + final_summary_text
-            )
+            "content": get_neutral_message("interview_finished")
         })
 
         pdf_path = generate_report(
@@ -614,8 +644,8 @@ async def soft_answer(req: SoftAnswer):
     session["messages"].append({
         "role": "assistant",
         "content": (
-            f"Спасибо за ответ!\n\n"
-            f"Следующая ситуация:\n{next_task['description']}\n\n"
+            get_neutral_message("soft_answered") +
+            f"\n\nСледующая ситуация:\n{next_task['description']}\n\n"
             "Введите ваш ответ ниже."
         )
     })

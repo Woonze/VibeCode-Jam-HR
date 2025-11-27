@@ -35,7 +35,9 @@ export default function Workspace() {
   const [task, setTask] = useState<Task | null>(null);
   const [softMode, setSoftMode] = useState(false);
   const [currentSoftTaskId, setCurrentSoftTaskId] = useState<string | null>(null);
-
+  const [completedTechTasks, setCompletedTechTasks] = useState(0); // 0-3
+  const [completedSoftTasks, setCompletedSoftTasks] = useState(0); // 0-3
+  const [showProgress, setShowProgress] = useState(false);
 
   const [value, setValue] = useState<string>("");
   const [log, setLog] = useState<string[]>([]);
@@ -355,6 +357,10 @@ export default function Workspace() {
     if (data.task) {
       setTask(data.task);
       setValue(data.task.template);
+      // Плавное появление progress bar после выбора языка и получения первой задачи
+      setTimeout(() => {
+        setShowProgress(true);
+      }, 300);
     }
   }
 
@@ -430,12 +436,23 @@ export default function Workspace() {
     if (data.ask_communication) {
       setWaitingCommunication(true);
       setCommunicationQuestion(data.communication_question);
+      // НЕ увеличиваем счетчик здесь - задача считается завершенной только после ответа на вопрос
       return;
     }
 
     if (data.task) {
       setTask(data.task);
       setValue(data.task.template);
+      // Увеличиваем счетчик завершенных технических задач при получении новой задачи
+      // (это означает, что предыдущая задача полностью завершена, включая ответ на вопрос по коммуникации)
+      // Важно: это может произойти только если мы не в softMode
+      if (!softMode) {
+        setCompletedTechTasks(prev => {
+          // Убеждаемся, что мы не превышаем максимум
+          const newValue = Math.min(3, prev + 1);
+          return newValue;
+        });
+      }
     }
 
     // === обработка soft-skills ===
@@ -444,6 +461,7 @@ export default function Workspace() {
 
       setSoftMode(true);
       setCurrentSoftTaskId(soft.id);
+      setCompletedTechTasks(3); // Все технические задачи завершены
 
       setTask({
           id: soft.id,
@@ -478,6 +496,7 @@ export default function Workspace() {
     }
   ]);
 
+  setCommunicationAnswer(""); // очищаем поле сразу после отправки
   setIsTyping(true);
 
   const res = await fetch("/api/communication_answer", {
@@ -505,6 +524,7 @@ export default function Workspace() {
 
     setSoftMode(true);
     setCurrentSoftTaskId(soft.id);
+    setCompletedTechTasks(3); // Все технические задачи завершены
 
     // переключаем текущую "задачу" на soft-вопрос
     setTask({
@@ -527,6 +547,15 @@ export default function Workspace() {
   if (data.task) {
     setTask(data.task);
     setValue(data.task.template);
+    // Увеличиваем счетчик завершенных технических задач при получении новой задачи
+    // Важно: проверяем, что мы еще не в softMode
+    if (!softMode) {
+      setCompletedTechTasks(prev => {
+        // Убеждаемся, что мы не превышаем максимум
+        const newValue = Math.min(3, prev + 1);
+        return newValue;
+      });
+    }
   }
 
   if (data.finished) {
@@ -552,6 +581,7 @@ async function sendSoftAnswer() {
     },
   ]);
 
+  setCommunicationAnswer(""); // очищаем поле сразу после отправки
   setIsTyping(true);
 
   const res = await fetch("/api/soft_answer", {
@@ -579,6 +609,8 @@ async function sendSoftAnswer() {
   if (data.next_question) {
     const q = data.next_question;
 
+    setCompletedSoftTasks(prev => prev + 1); // Увеличиваем счетчик завершенных soft-задач
+
     setTask({
       id: q.id,
       title: "Soft-skills вопрос",
@@ -596,7 +628,8 @@ async function sendSoftAnswer() {
 
   // если soft-интервью завершено
   if (data.finished) {
-    setSoftMode(false);
+    // НЕ сбрасываем softMode, чтобы интерфейс оставался в том же состоянии
+    setCompletedSoftTasks(3); // Все soft-skills вопросы завершены
     setWaitingCommunication(false);
     setInterviewFinished(true);
   }
@@ -621,6 +654,16 @@ async function sendSoftAnswer() {
 
     return "Задание";
   };
+
+  // Расчет прогресса собеседования
+  const calculateProgress = () => {
+    const totalStages = 6; // 3 технических + 3 soft-skills
+    const completedStages = completedTechTasks + completedSoftTasks;
+    const progressPercent = Math.min(100, Math.round((completedStages / totalStages) * 100));
+    return progressPercent;
+  };
+
+  const progress = calculateProgress();
 
 
 
@@ -657,6 +700,21 @@ async function sendSoftAnswer() {
             )}
           </div>
         </header>
+
+        {/* PROGRESS BAR */}
+        {track && !interviewFinished && showProgress && (
+          <div className="ws-progress-container">
+            <div className="ws-progress-bar">
+              <div 
+                className="ws-progress-fill" 
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <div className="ws-progress-text">
+              Прогресс: {progress}% ({completedTechTasks + completedSoftTasks}/6 этапов)
+            </div>
+          </div>
+        )}
 
         {/* MAIN */}
         <div className="ws-main">
@@ -746,26 +804,20 @@ async function sendSoftAnswer() {
                       Интервью завершено 🎉  
                     </div>
                   ) : waitingCommunication ? (
-                    <>
+                    <div className="ws-question-input-container">
                       <textarea
-                        className="ws-comm-input"
+                        className="ws-question-input"
                         placeholder="Введите ответ..."
                         value={communicationAnswer}
                         onChange={(e) => setCommunicationAnswer(e.target.value)}
-                        style={{
-                          width: "100%",
-                          height: "80px",
-                          resize: "none",
-                          marginBottom: 10,
-                        }}
                       />
                       <button
-                        className="ws-btn ws-btn-primary"
+                        className="ws-send-question-btn"
                         onClick={onDoneButton}
                       >
                         Ответить
                       </button>
-                    </>
+                    </div>
                   ) : (
                     <>
                       <button
@@ -792,131 +844,160 @@ async function sendSoftAnswer() {
           <section className="ws-right">
             {track && task && (
               <>
-                {/* ===== ВЕРХНЯЯ ПАНЕЛЬ: редактор ИЛИ soft-skills ===== */}
-                {softMode ? (
-                  // ---- Soft-skills режим: вместо редактора просто текст ----
-                  <div className="ws-editor-panel ws-soft-panel">
-                    <div className="ws-editor-header">
-                      <div className="ws-editor-title">
-                        Soft-skills интервью
-                        <span className="ws-editor-lang-tag">Q&A</span>
-                      </div>
-                    </div>
-
-                    <div className="ws-editor-body ws-soft-body">
-                      <h3 className="ws-soft-question-title">{task.title}</h3>
-                      <p className="ws-soft-question-desc">{task.description}</p>
-
-                      {task.template && (
-                        <>
-                          <div className="ws-soft-hint-label">
-                            Ситуация:
-                          </div>
-                          <pre className="ws-soft-template">
-                            {task.template}
-                          </pre>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  // ---- Обычный режим: редактор кода ----
+                {interviewFinished ? (
+                  // ---- Интервью завершено - показываем сообщение ----
                   <div className="ws-editor-panel">
                     <div className="ws-editor-header">
                       <div className="ws-editor-title">
-                        Редактор решения
-                        <span className="ws-editor-lang-tag">
-                          {(task.language || "javascript").toUpperCase()}
-                        </span>
+                        Интервью завершено
                       </div>
                     </div>
-
-                    <div className="ws-editor-body">
-                      <Editor
-                        height="100%"
-                        defaultLanguage={task?.language || "javascript"}
-                        value={value}
-                        onChange={(v) => setValue(v || "")}
-                        theme="vs-dark"
-                        onMount={(editor) => {
-                          editorRef.current = editor;
-                        }}
-                      />
+                    <div className="ws-editor-body" style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      flexDirection: 'column',
+                      padding: '40px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '48px', marginBottom: '20px' }}>🎉</div>
+                      <h3 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '12px' }}>
+                        Интервью успешно завершено!
+                      </h3>
+                      <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: '1.6' }}>
+                        Спасибо за участие. Результаты будут обработаны и отправлены вам позже.
+                      </p>
                     </div>
                   </div>
-                )}
-
-                {/* ===== НИЖНЯЯ ПАНЕЛЬ: логи/тесты или заглушка для soft-skills ===== */}
-                <div className="ws-bottom-panels">
-                  {softMode ? (
-                    <div className="ws-panel ws-soft-panel-info">
-                      <div className="ws-panel-header">Soft-skills блок</div>
-                      <div className="ws-panel-body">
-                        Это часть интервью по soft-skills.<br />
-                        Пишите ответ в поле слева внизу, кнопка
-                        <b> «Ответить»</b> отправит его на оценку.<br />
-                        Автотестов и логов здесь нет - оценка попадёт в итоговый отчёт.
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="ws-panel ws-log-panel">
-                        <div className="ws-panel-header">Логи</div>
-                        <div className="ws-panel-body ws-log-body">
-                          {log.map((l, i) => (
-                            <div key={i} className="ws-log-line">
-                              {l}
-                            </div>
-                          ))}
+                ) : (
+                  <>
+                    {/* ===== ВЕРХНЯЯ ПАНЕЛЬ: редактор ИЛИ soft-skills ===== */}
+                    {softMode ? (
+                      // ---- Soft-skills режим: вместо редактора просто текст ----
+                      <div className="ws-editor-panel ws-soft-panel">
+                        <div className="ws-editor-header">
+                          <div className="ws-editor-title">
+                            Soft-skills интервью
+                            <span className="ws-editor-lang-tag">Q&A</span>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="ws-panel ws-feedback-panel">
-                        <div className="ws-panel-header">Результаты тестов</div>
-                        <div className="ws-panel-body">
-                          {feedback && feedback.tests ? (
-                            <div className="ws-tests-list">
-                              {/* === ВИДИМЫЕ ТЕСТЫ === */}
-                              {feedback.tests
-                                .filter((t: TestResults) => t.visible)
-                                .map((t: TestResults, i: number) => (
-                                  <div key={i} className="ws-test-item">
-                                    <span
-                                      className={`ws-test-status ${
-                                        t.passed ? "ok" : "fail"
-                                      }`}
-                                    >
-                                      {t.passed ? "✔" : "✘"}
-                                    </span>
-                                    <span className="ws-test-name">{t.name}</span>
-                                  </div>
-                                ))}
-                              {/* === СКРЫТЫЕ ТЕСТЫ (только итог статус) === */}
-                              <div className="ws-hidden-tests-summary">
-                                Скрытые тесты:{" "}
-                                <b>
-                                  {
-                                    feedback.tests.filter(
-                                      (t: TestResults) => !t.visible && t.passed
-                                    ).length
-                                  }
-                                  /
-                                  {
-                                    feedback.tests.filter(
-                                      (t: TestResults) => !t.visible
-                                    ).length
-                                  }
-                                </b>
+                        <div className="ws-editor-body ws-soft-body">
+                          <h3 className="ws-soft-question-title">{task.title}</h3>
+                          <p className="ws-soft-question-desc">{task.description}</p>
+
+                          {task.template && (
+                            <>
+                              <div className="ws-soft-hint-label">
+                                Ситуация:
                               </div>
-                            </div>
-                          ) : (
-                            <div>Тесты появятся после отправки решения.</div>
+                              <pre className="ws-soft-template">
+                                {task.template}
+                              </pre>
+                            </>
                           )}
                         </div>
                       </div>
-                    </>
-                  )}
-                </div>
+                    ) : (
+                      // ---- Обычный режим: редактор кода ----
+                      <div className="ws-editor-panel">
+                        <div className="ws-editor-header">
+                          <div className="ws-editor-title">
+                            Редактор решения
+                            <span className="ws-editor-lang-tag">
+                              {(task.language || "javascript").toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="ws-editor-body">
+                          <Editor
+                            height="100%"
+                            defaultLanguage={task?.language || "javascript"}
+                            value={value}
+                            onChange={(v) => setValue(v || "")}
+                            theme="vs-dark"
+                            onMount={(editor) => {
+                              editorRef.current = editor;
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ===== НИЖНЯЯ ПАНЕЛЬ: логи/тесты или заглушка для soft-skills ===== */}
+                    <div className="ws-bottom-panels">
+                      {softMode ? (
+                        <div className="ws-panel ws-soft-panel-info">
+                          <div className="ws-panel-header">Soft-skills блок</div>
+                          <div className="ws-panel-body">
+                            Это часть интервью по soft-skills.<br />
+                            Пишите ответ в поле слева внизу, кнопка
+                            <b> «Ответить»</b> отправит его на оценку.<br />
+                            Автотестов и логов здесь нет - оценка попадёт в итоговый отчёт.
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="ws-panel ws-log-panel">
+                            <div className="ws-panel-header">Логи</div>
+                            <div className="ws-panel-body ws-log-body">
+                              {log.map((l, i) => (
+                                <div key={i} className="ws-log-line">
+                                  {l}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="ws-panel ws-feedback-panel">
+                            <div className="ws-panel-header">Результаты тестов</div>
+                            <div className="ws-panel-body">
+                              {feedback && feedback.tests ? (
+                                <div className="ws-tests-list">
+                                  {/* === ВИДИМЫЕ ТЕСТЫ === */}
+                                  {feedback.tests
+                                    .filter((t: TestResults) => t.visible)
+                                    .map((t: TestResults, i: number) => (
+                                      <div key={i} className="ws-test-item">
+                                        <span
+                                          className={`ws-test-status ${
+                                            t.passed ? "ok" : "fail"
+                                          }`}
+                                        >
+                                          {t.passed ? "✔" : "✘"}
+                                        </span>
+                                        <span className="ws-test-name">{t.name}</span>
+                                      </div>
+                                    ))}
+                                  {/* === СКРЫТЫЕ ТЕСТЫ (только итог статус) === */}
+                                  <div className="ws-hidden-tests-summary">
+                                    Скрытые тесты:{" "}
+                                    <b>
+                                      {
+                                        feedback.tests.filter(
+                                          (t: TestResults) => !t.visible && t.passed
+                                        ).length
+                                      }
+                                      /
+                                      {
+                                        feedback.tests.filter(
+                                          (t: TestResults) => !t.visible
+                                        ).length
+                                      }
+                                    </b>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>Тесты появятся после отправки решения.</div>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
               </>
             )}
           </section>
