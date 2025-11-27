@@ -604,6 +604,24 @@ async function sendSoftAnswer() {
   setCommunicationAnswer("");
 }
 
+  const getTaskDifficultyLabel = () => {
+    if (!task) return "";
+
+    // Для soft-части интерфейса
+    if (softMode) return "soft-skill";
+
+    const id = task.id.toLowerCase();
+
+    if (id.includes("easy")) return "Легко";
+    if (id.includes("med") || id.includes("medium")) return "Средне";
+    if (id.includes("hard")) return "Сложно";
+
+    // если ID какой-то особенный
+    if (id.includes("soft")) return "soft-skill";
+
+    return "Задание";
+  };
+
 
 
   // ================================
@@ -634,7 +652,7 @@ async function sendSoftAnswer() {
 
             {task && (
               <div className="ws-task-label">
-                Текущее задание: <span>{task.id}</span>
+                Текущее задание: <span>{getTaskDifficultyLabel()}</span>
               </div>
             )}
           </div>
@@ -650,7 +668,7 @@ async function sendSoftAnswer() {
               <div className="ws-task-card">
                 <div className="ws-task-header">
                   <span className="ws-task-pill">Текущее задание</span>
-                  <span className="ws-task-id">{task.id}</span>
+                  <span className="ws-task-id">{getTaskDifficultyLabel()}</span>
                 </div>
 
                 <div className="ws-task-title">{task.title}</div>

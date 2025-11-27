@@ -539,7 +539,8 @@ async def soft_answer(req: SoftAnswer):
         final_summary = build_final_summary(
             session["results"],
             session["communications"],
-            session["soft_results"]
+            session["soft_results"],
+            session["antiCheat"]
         )
 
         final_summary_text = format_summary_text(final_summary)
@@ -696,39 +697,153 @@ async def anti_cheat_analyze(req: AntiCheatAnalyze):
 # -------------------------------------------------
 # Вспомогательная функция: финальное резюме
 # -------------------------------------------------
-def build_final_summary(results: List[Dict[str, Any]], communications: List[Dict[str, Any]], soft_results) -> dict:
+def build_final_summary(
+        results: List[Dict[str, Any]], 
+        communications: List[Dict[str, Any]], 
+        soft_results: List[Dict[str, Any]],
+        anti_cheat_data: Dict[str, Any]
+) -> dict:
     """
-    Возвращает финальный отчёт:
-    {
-      "average_code": ...,
-      "average_comm": ...,
-      "strengths": [...],
-      "weaknesses": [...],
-      "recommendations": [...],
-      "summary": "..."
-    }
+    Финальный агрегированный отчёт по интервью:
+
+    - average_code_score: средний балл за задачи (0–100)
+    - average_comm_score: средний балл за коммуникацию по технической части (0–100)
+    - soft_scores: агрегаты по soft-skills (по метрикам + общий)
+    - anti_cheat: краткая сводка по античиту
+    - overall_score: интегральный балл кандидата
+    - hire_decision: короткий вердикт ("Рекомендован", "Условно рекомендован", "Не рекомендован")
+    - hire_recommendation: человеко-читаемое пояснение
+    - strengths / weaknesses / recommendations / summary: текст от LLM
     """
 
     import json
 
-    # средние оценки
-    code_scores = []
-    comm_scores = []
-
+    # ---------- 1. Средние оценки по коду ----------
+    code_scores: list[float] = []
     for r in results:
         s = r.get("analysis", {}).get("score")
         if isinstance(s, (int, float)):
             code_scores.append(s)
 
+    avg_code = round(sum(code_scores) / len(code_scores), 2) if code_scores else 0.0
+
+    # ---------- 2. Средние оценки по коммуникации (тех часть) ----------
+    comm_scores: list[float] = []
     for c in communications:
         s = c.get("score_comm")
         if isinstance(s, (int, float)):
             comm_scores.append(s)
 
-    avg_code = round(sum(code_scores) / len(code_scores), 2) if code_scores else 0
-    avg_comm = round(sum(comm_scores) / len(comm_scores), 2) if comm_scores else 0
+    avg_comm = round(sum(comm_scores) / len(comm_scores), 2) if comm_scores else 0.0
 
-    # Отправляем всё в LLM
+    # ---------- 3. Агрегаты по soft-skills ----------
+    soft_comm, soft_team, soft_adapt, soft_lead, soft_prob = [], [], [], [], []
+
+    for item in soft_results:
+        a = item.get("analysis", {}) or {}
+        if isinstance(a.get("score_communication"), (int, float)):
+            soft_comm.append(a["score_communication"])
+        if isinstance(a.get("score_teamwork"), (int, float)):
+            soft_team.append(a["score_teamwork"])
+        if isinstance(a.get("score_adaptability"), (int, float)):
+            soft_adapt.append(a["score_adaptability"])
+        if isinstance(a.get("score_leadership"), (int, float)):
+            soft_lead.append(a["score_leadership"])
+        if isinstance(a.get("score_problem_solving"), (int, float)):
+            soft_prob.append(a["score_problem_solving"])
+
+    def avg(lst: list[float]) -> float:
+        return round(sum(lst) / len(lst), 2) if lst else 0.0
+
+    soft_scores = {
+        "communication": avg(soft_comm),
+        "teamwork": avg(soft_team),
+        "adaptability": avg(soft_adapt),
+        "leadership": avg(soft_lead),
+        "problem_solving": avg(soft_prob),
+    }
+
+    # общий soft-skills балл (просто среднее по всем метрикам)
+    soft_values = [v for v in soft_scores.values() if isinstance(v, (int, float))]
+    soft_overall = round(sum(soft_values) / len(soft_values), 2) if soft_values else 0.0
+    soft_scores["overall"] = soft_overall
+
+    # ---------- 4. Античит: сводка ----------
+    analyses = anti_cheat_data.get("analyses", []) or []
+    stats = anti_cheat_data.get("statistics", {}) or {}
+
+    if analyses:
+        last_analysis = analyses[-1].get("analysis", {}) or {}
+        cheating_probability = float(last_analysis.get("cheating_probability", 0) or 0)
+        risk_level = (last_analysis.get("risk_level") or "low").lower()
+    else:
+        cheating_probability = 0.0
+        risk_level = "low"
+
+    # русифицируем риск
+    risk_map = {"low": "низкий", "medium": "средний", "high": "высокий"}
+    risk_ru = risk_map.get(risk_level, risk_level)
+
+    anti_cheat_summary = (
+        f"Вероятность списывания: {cheating_probability:.0f}%. "
+        f"Уровень риска: {risk_ru}."
+    )
+
+    if risk_level == "high" or cheating_probability >= 70:
+        cheating_flag = "Есть высокие подозрения на списывание."
+    elif risk_level == "medium" or cheating_probability >= 40:
+        cheating_flag = "Есть отдельные признаки возможного списывания, требуется дополнительная проверка."
+    else:
+        cheating_flag = "Значимых признаков списывания не выявлено."
+
+    anti_cheat_block = {
+        "cheating_probability": cheating_probability,
+        "risk_level": risk_level,
+        "risk_level_ru": risk_ru,
+        "summary": anti_cheat_summary,
+        "flag": cheating_flag,
+        "statistics": {
+            "total_paste_count": stats.get("total_paste_count", 0),
+            "total_tab_switch_count": stats.get("total_tab_switch_count", 0),
+            "total_analyses": stats.get("total_analyses", 0),
+        },
+    }
+
+    # ---------- 5. Интегральный балл и решение по найму ----------
+    overall_score = round(
+        avg_code * 0.5    # основа — технические задачи
+        + avg_comm * 0.2  # коммуникация при обсуждении решений
+        + soft_overall * 0.3,  # soft-skills
+        2,
+    )
+
+    if risk_level == "high" or cheating_probability >= 70:
+        hire_decision = "Не рекомендован"
+        hire_recommendation = (
+            "Несмотря на результаты по задачам, высокий риск списывания. "
+            "Не рекомендован к найму без дополнительной жесткой проверки."
+        )
+    else:
+        if overall_score >= 80:
+            hire_decision = "Рекомендован"
+            hire_recommendation = (
+                "Кандидат демонстрирует сильный технический уровень и адекватные soft-skills. "
+                "Рекомендован к найму."
+            )
+        elif overall_score >= 60:
+            hire_decision = "Условно рекомендован"
+            hire_recommendation = (
+                "Кандидат показывает приемлемый уровень, но есть зоны роста. "
+                "Возможен найм при условии планируемого дообучения/испытательного срока."
+            )
+        else:
+            hire_decision = "Не рекомендован"
+            hire_recommendation = (
+                "Текущий уровень по сумме метрик ниже ожидаемого. "
+                "Не рекомендован к найму на целевую позицию."
+            )
+
+    # ---------- 6. Запрашиваем от LLM strengths / weaknesses / recommendations / summary ----------
     prompt = f"""
 Ты — старший IT-рекрутер.
 
@@ -767,10 +882,15 @@ def build_final_summary(results: List[Dict[str, Any]], communications: List[Dict
     raw = resp.choices[0].message.content
     parsed = json.loads(raw)
 
-
+    # ---------- 7. Склеиваем всё в один dict ----------
     return {
         "average_code_score": avg_code,
         "average_comm_score": avg_comm,
         "soft_results": soft_results,
-        **parsed
+        "soft_scores": soft_scores,
+        "anti_cheat": anti_cheat_block,
+        "overall_score": overall_score,
+        "hire_decision": hire_decision,
+        "hire_recommendation": hire_recommendation,
+        **parsed,  # strengths / weaknesses / recommendations / summary
     }

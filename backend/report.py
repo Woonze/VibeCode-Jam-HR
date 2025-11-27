@@ -2,6 +2,7 @@
 
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -168,9 +169,42 @@ def generate_report(
     y -= 25
 
     # ------------------------------------------------
-    # 1. History
+    # 1. Общая рекомендация
     # ------------------------------------------------
-    y = draw_section_header(c, "1. История выполнения задач", y)
+    y = draw_section_header(c, "1. Общая рекомендация", y)
+
+    avg_code = final_summary.get("average_code_score", 0)
+    avg_comm = final_summary.get("average_comm_score", 0)
+    soft_scores = final_summary.get("soft_scores", {})
+    soft_overall = soft_scores.get("overall", 0)
+
+    anti = final_summary.get("anti_cheat", {})
+    overall_score = final_summary.get("overall_score", 0)
+    hire_decision = final_summary.get("hire_decision", "")
+    hire_recommendation = final_summary.get("hire_recommendation", "")
+
+    # красивая карточка
+    c.setFillColor(SUBTLE_BG)
+    c.rect(30, y - 4, 550, -100, fill=1, stroke=0)
+    c.setFillColor(TEXT)
+
+    y -= 14
+    y = draw_paragraph(c, f"Средняя оценка за задачи: {avg_code}/100", y, indent=10)
+    y = draw_paragraph(c, f"Средняя оценка за коммуникацию (по решению задач): {avg_comm}/100", y, indent=10)
+    y = draw_paragraph(c, f"Итоговая оценка soft-skills: {soft_overall}/100", y, indent=10)
+    y = draw_paragraph(c, f"Античит: {anti.get('summary', '')}", y, indent=10)
+    y = draw_paragraph(c, f"Интегральный балл кандидата: {overall_score}/100", y, indent=10)
+    y = draw_paragraph(c, f"Решение по найму: {hire_decision}", y, indent=10)
+    y = draw_paragraph(c, hire_recommendation, y, indent=10)
+
+    y -= 10
+    y = new_page_if_needed(c, y)
+
+
+    # ------------------------------------------------
+    # 2. History
+    # ------------------------------------------------
+    y = draw_section_header(c, "2. История выполнения задач", y)
 
     if not history:
         y = draw_paragraph(c, "История отсутствует.", y)
@@ -195,9 +229,9 @@ def generate_report(
             y = new_page_if_needed(c, y)
 
     # ------------------------------------------------
-    # 2. Решения
+    # 3. Решения
     # ------------------------------------------------
-    y = draw_section_header(c, "2. Решения кандидата", y)
+    y = draw_section_header(c, "3. Решения кандидата", y)
 
     for r in results:
         y = draw_subtitle(c, f"{r['taskId']} — {r['title']}", y)
@@ -207,9 +241,9 @@ def generate_report(
         y = new_page_if_needed(c, y)
 
     # ------------------------------------------------
-    # 3. LLM-анализ
+    # 4. LLM-анализ
     # ------------------------------------------------
-    y = draw_section_header(c, "3. Анализ решений (LLM)", y)
+    y = draw_section_header(c, "4. Анализ решений (LLM)", y)
 
     for r in results:
         analysis = r["analysis"]
@@ -235,9 +269,9 @@ def generate_report(
         y = new_page_if_needed(c, y)
 
     # ------------------------------------------------
-    # 4. Итоговая оценка
+    # 5. Итоговая оценка
     # ------------------------------------------------
-    y = draw_section_header(c, "4. Итоговая оценка кандидата", y)
+    y = draw_section_header(c, "5. Итоговая оценка кандидата", y)
 
     # карточка итогов
     c.setFillColor(SUBTLE_BG)
@@ -261,9 +295,9 @@ def generate_report(
     y = draw_paragraph(c, f"Итог: {final_summary['summary']}", y)
 
     # ------------------------------------------------
-    # 5. Коммуникация
+    # 6. Коммуникация
     # ------------------------------------------------
-    y = draw_section_header(c, "5. Коммуникативные ответы", y)
+    y = draw_section_header(c, "6. Коммуникативные ответы", y)
 
     if not communications:
         y = draw_paragraph(c, "Коммуникационных вопросов не было.", y)
@@ -279,9 +313,9 @@ def generate_report(
             y = new_page_if_needed(c, y)
 
     # ------------------------------------------------
-    # 6. Античит
+    # 7. Античит
     # ------------------------------------------------
-    y = draw_section_header(c, "6. Анализ античита", y)
+    y = draw_section_header(c, "7. Анализ античита", y)
 
     stats = anti_cheat_data.get("statistics", {})
     y = draw_paragraph(
@@ -330,8 +364,8 @@ def generate_report(
     else:
         y = draw_paragraph(c, "Подозрительных признаков не обнаружено.", y)
 
-        # ---------------- 7. Soft-Skills интервью ----------------
-    y = draw_subtitle(c, "7. Soft-Skills интервью", y)
+        # ---------------- 8. Soft-Skills интервью ----------------
+    y = draw_subtitle(c, "8. Soft-Skills интервью", y)
 
     soft_results = final_summary.get("soft_results", [])
 
