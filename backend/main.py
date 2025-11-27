@@ -154,7 +154,7 @@ async def start_interview():
     # выдаём лёгкое задание
     task = random.choice(bank["easy"])
     session["currentTask"] = task
-    task["language"] = session["track"]
+    task["language"] = "javascript" if session["track"] == "js" else "python"
 
     session["messages"].append({
         "role": "assistant",
@@ -235,9 +235,47 @@ async def submit(req: AssessRequest):
 
     # Запуск тестов
     if track == "js":
-        test_results = run_tests_js(task["id"], req.code, TEST_BANK_JS)
+        raw = run_tests_js(task["id"], req.code, TEST_BANK_JS)
     else:
-        test_results = run_tests_py(task["id"], req.code, TEST_BANK_PY)
+        raw = run_tests_py(task["id"], req.code, TEST_BANK_PY)
+
+    if isinstance(raw, dict):
+        raw_test_results = raw.get("tests", [])
+    else:
+        raw_test_results = raw or []
+
+    test_results: list[dict] = []
+
+    for idx, t in enumerate(raw_test_results):
+        # базовые поля
+        name = t.get("name") or t.get("title") or f"Тест #{idx+1}"
+
+        if "passed" in t:
+            passed = bool(t["passed"])
+        elif "ok" in t:
+            passed = bool(t["ok"])
+        elif "success" in t:
+            passed = bool(t["success"])
+        elif "result" in t:
+            val = t["result"]
+            if isinstance(val, bool):
+                passed = val
+            elif isinstance(val, (int, float)):
+                passed = val != 0
+            elif isinstance(val, str):
+                passed = val.lower() in ("ok", "pass", "passed", "success", "true")
+            else:
+                passed = False
+        else:
+            passed = False
+
+        visible = t.get("visible", True)
+
+        test_results.append({
+            "name": name,
+            "passed": passed,
+            "visible": bool(visible),
+        })
 
     # считаем балл за тесты (30% от итоговой оценки)
     passed = sum(1 for t in test_results if t["passed"])
@@ -429,7 +467,7 @@ async def communication_answer(data: dict):
 
         next_level = "medium" if session["taskNumber"] == 2 else "hard"
         next_task = random.choice(bank[next_level])
-        next_task["language"] = track
+        next_task["language"] = "javascript" if track == "js" else "python"
         session["currentTask"] = next_task
 
         session["messages"].append({
