@@ -89,6 +89,7 @@ interviews: Dict[str, Dict[str, Any]] = {
         "currentTask": None,
         "waitingCommunication": False,
         "lastCommunicationQuestion": None,
+        "report_generated": False,  # Флаг, что отчет уже сгенерирован
         "pendingResult": None,
         "communications": [],
         "antiCheat": {  # данные античита
@@ -143,6 +144,7 @@ async def select_track(data: dict):
     session["currentSoftIndex"] = 0
     session["soft_results"] = []
     session["soft_stage"] = False
+    session["report_generated"] = False  # Сбрасываем флаг генерации отчета
     session["antiCheat"] = {
         "events": [],
         "codeSnapshots": [],
@@ -179,6 +181,7 @@ async def start_interview():
     session["messages"] = []
     session["history"] = []
     session["results"] = []
+    session["report_generated"] = False  # Сбрасываем флаг генерации отчета
     # Античит уже инициализирован в select_track, но на всякий случай проверяем
     if "antiCheat" not in session:
         session["antiCheat"] = {
@@ -606,30 +609,39 @@ async def soft_answer(req: SoftAnswer):
     if session["currentSoftIndex"] >= len(tasks):
         session["soft_stage"] = False
 
-        # Финальный суммарный отчёт с учётом soft-skills
-        final_summary = build_final_summary(
-            session["results"],
-            session["communications"],
-            session["soft_results"],
-            session["antiCheat"]
-        )
+        # Генерируем отчет только один раз
+        pdf_path = None
+        if not session.get("report_generated", False):
+            # Финальный суммарный отчёт с учётом soft-skills
+            final_summary = build_final_summary(
+                session["results"],
+                session["communications"],
+                session["soft_results"],
+                session["antiCheat"]
+            )
 
-        final_summary_text = format_summary_text(final_summary)
+            session["messages"].append({
+                "role": "assistant",
+                "content": get_neutral_message("interview_finished")
+            })
 
-        session["messages"].append({
-            "role": "assistant",
-            "content": get_neutral_message("interview_finished")
-        })
-
-        pdf_path = generate_report(
-            candidate_name="Candidate_1",
-            results=session["results"],
-            history=session["history"],
-            final_summary=final_summary,
-            track=session["track"],
-            communications=session["communications"],
-            anti_cheat_data=session["antiCheat"]
-        )
+            pdf_path = generate_report(
+                candidate_name="Candidate_1",
+                results=session["results"],
+                history=session["history"],
+                final_summary=final_summary,
+                track=session["track"],
+                communications=session["communications"],
+                anti_cheat_data=session["antiCheat"]
+            )
+            
+            session["report_generated"] = True
+        else:
+            # Если отчет уже был сгенерирован, просто добавляем сообщение
+            session["messages"].append({
+                "role": "assistant",
+                "content": get_neutral_message("interview_finished")
+            })
 
         return {
             "messages": session["messages"],

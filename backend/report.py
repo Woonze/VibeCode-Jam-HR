@@ -146,6 +146,18 @@ def generate_report(
 ) -> str:
 
     os.makedirs("reports", exist_ok=True)
+    
+    # Очищаем старые отчеты для этого кандидата перед генерацией нового
+    import glob
+    pattern = f"reports/report_{candidate_name}_*.pdf"
+    old_reports = glob.glob(pattern)
+    for old_report in old_reports:
+        try:
+            os.remove(old_report)
+        except Exception as e:
+            print(f"Не удалось удалить старый отчет {old_report}: {e}")
+    
+    # Генерируем новый отчет с уникальным именем
     filename = f"reports/report_{candidate_name}_{uuid.uuid4().hex}.pdf"
 
     c = canvas.Canvas(filename, pagesize=letter)
