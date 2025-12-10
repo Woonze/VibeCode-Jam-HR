@@ -1,5 +1,7 @@
 # 📘 **README.md — AI HR Interview System**
 
+<img width="5867" height="8292" alt="Хакатон_Т1_Москва_Certificate_2025_12_08_23_08_58_189Z" src="https://github.com/user-attachments/assets/0f2b2109-59e2-4845-aeb6-f277bbfeb9b1" />
+
 # 📹 **ВИДЕО-ДЕМО** https://vkvideo.ru/video357211139_456239446?list=ln-g35R2RMOa4AhLszlpj&uh=8511c5350bff62&sh=4
 
 AI HR Interview System — это интерактивная система технического интервью с кандидатом, включающая:
